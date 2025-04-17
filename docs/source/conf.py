@@ -6,11 +6,10 @@
 # full list see the documentation:
 # http://www.sphinx-doc.org/en/stable/config
 
-from pathlib import Path
+import os
 from typing import Dict, List
 
-import m2r2
-import toml
+import viser
 
 # -- Path setup --------------------------------------------------------------
 
@@ -25,10 +24,7 @@ project = "viser"
 copyright = "2024"
 author = "brentyi"
 
-# The short X.Y version
-version: str = toml.load(
-    Path(__file__).absolute().parent.parent.parent / "pyproject.toml"
-)["project"]["version"]
+version: str = os.environ.get("VISER_VERSION_STR_OVERRIDE", viser.__version__)
 
 # Formatting!
 #     0.1.30 => v0.1.30
@@ -58,7 +54,6 @@ extensions = [
     "sphinx.ext.napoleon",
     # "sphinx.ext.inheritance_diagram",
     "sphinx.ext.viewcode",
-    "m2r2",
     "sphinxcontrib.programoutput",
     "sphinxcontrib.ansi",
     "sphinxcontrib.googleanalytics",  # google analytics extension https://github.com/sphinx-contrib/googleanalytics/tree/master
@@ -105,7 +100,7 @@ templates_path = ["_templates"]
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
 #
-source_suffix = [".rst", ".md"]
+source_suffix = ".rst"
 # source_suffix = ".rst"
 
 # The master toctree document.
@@ -124,7 +119,7 @@ language: str = "en"
 exclude_patterns: List[str] = []
 
 # The name of the Pygments (syntax highlighting) style to use.
-pygments_style = "monokai"
+pygments_style = "default"
 
 
 # -- Options for HTML output -------------------------------------------------
@@ -237,18 +232,10 @@ googleanalytics_id = "G-RRGY51J5ZH"
 # If true, `todo` and `todoList` produce output, else they produce nothing.
 todo_include_todos = True
 
-# -- Enable Markdown -> RST conversion ----------------------------------------
-
-
-def docstring(app, what, name, obj, options, lines):
-    md = "\n".join(lines)
-    rst = m2r2.convert(md)
-    lines.clear()
-    lines += rst.splitlines()
+# -- Setup function ----------------------------------------
 
 
 def setup(app):
-    app.connect("autodoc-process-docstring", docstring)
     app.add_css_file("css/custom.css")
 
 
@@ -267,6 +254,6 @@ napoleon_use_admonition_for_references = False
 napoleon_use_ivar = False
 napoleon_use_param = True
 napoleon_use_rtype = True
-napoleon_preprocess_types = False
+napoleon_preprocess_types = True
 napoleon_type_aliases = None
 napoleon_attr_annotations = True

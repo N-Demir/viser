@@ -1,7 +1,8 @@
 import WebsocketServerWorker from "./WebsocketServerWorker?worker";
 import React, { useContext } from "react";
+import { notifications } from "@mantine/notifications";
 
-import { ViewerContext } from "./App";
+import { ViewerContext } from "./ViewerContext";
 import { syncSearchParamServer } from "./SearchParamsUtils";
 import { WsWorkerIncoming, WsWorkerOutgoing } from "./WebsocketServerWorker";
 
@@ -11,6 +12,7 @@ export function WebsocketMessageProducer() {
   const viewer = useContext(ViewerContext)!;
   const server = viewer.useGui((state) => state.server);
   const resetGui = viewer.useGui((state) => state.resetGui);
+  const resetScene = viewer.useSceneTree((state) => state.resetScene);
 
   syncSearchParamServer(server);
 
@@ -21,6 +23,7 @@ export function WebsocketMessageProducer() {
       const data: WsWorkerOutgoing = event.data;
       if (data.type === "connected") {
         resetGui();
+        resetScene();
         viewer.useGui.setState({ websocketConnected: true });
         viewer.sendMessageRef.current = (message) => {
           postToWorker({ type: "send", message: message });
@@ -33,6 +36,18 @@ export function WebsocketMessageProducer() {
             `Tried to send ${message.type} but websocket is not connected!`,
           );
         };
+
+        // Show notification for version mismatch.
+        if (data.versionMismatch) {
+          notifications.show({
+            id: "version-mismatch",
+            title: "Connection rejected",
+            message: `${data.closeReason}.`,
+            color: "red",
+            autoClose: 5000,
+            withCloseButton: true,
+          });
+        }
       } else if (data.type === "message_batch") {
         messageQueueRef.current.push(...data.messages);
       }
@@ -49,7 +64,7 @@ export function WebsocketMessageProducer() {
         );
       viewer.useGui.setState({ websocketConnected: false });
     };
-  }, [server, resetGui]);
+  }, [server, resetGui, resetScene]);
 
   return <></>;
 }

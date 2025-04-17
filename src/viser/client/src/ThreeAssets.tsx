@@ -1,62 +1,41 @@
-import { Instance, Instances, shaderMaterial } from "@react-three/drei";
-import { createPortal, useFrame, useThree } from "@react-three/fiber";
-import { Outlines } from "./Outlines";
+import { Instance, Instances, Line, shaderMaterial } from "@react-three/drei";
+import { useFrame, useThree } from "@react-three/fiber";
+import { OutlinesIfHovered } from "./OutlinesIfHovered";
 import React from "react";
+import { HoverableContext } from "./HoverContext";
 import * as THREE from "three";
-import { GLTF, GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import {
-  MeshBasicMaterial,
-  MeshDepthMaterial,
-  MeshDistanceMaterial,
-  MeshLambertMaterial,
-  MeshMatcapMaterial,
-  MeshNormalMaterial,
-  MeshPhongMaterial,
-  MeshPhysicalMaterial,
-  MeshStandardMaterial,
-  MeshToonMaterial,
-  ShadowMaterial,
-  SpriteMaterial,
-  RawShaderMaterial,
-  ShaderMaterial,
-  PointsMaterial,
-  LineBasicMaterial,
-  LineDashedMaterial,
-} from "three";
-import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader";
-
-type AllPossibleThreeJSMaterials =
-  | MeshBasicMaterial
-  | MeshDepthMaterial
-  | MeshDistanceMaterial
-  | MeshLambertMaterial
-  | MeshMatcapMaterial
-  | MeshNormalMaterial
-  | MeshPhongMaterial
-  | MeshPhysicalMaterial
-  | MeshStandardMaterial
-  | MeshToonMaterial
-  | ShadowMaterial
-  | SpriteMaterial
-  | RawShaderMaterial
-  | ShaderMaterial
-  | PointsMaterial
-  | LineBasicMaterial
-  | LineDashedMaterial;
+  CameraFrustumMessage,
+  ImageMessage,
+  PointCloudMessage,
+} from "./WebsocketMessages";
+import { BatchedMeshHoverOutlines } from "./mesh/BatchedMeshHoverOutlines";
+import { rgbToInt } from "./mesh/MeshUtils";
+import { MeshBasicMaterial } from "three";
 
 const originGeom = new THREE.SphereGeometry(1.0);
-const originMaterial = new THREE.MeshBasicMaterial({ color: 0xecec00 });
 
 const PointCloudMaterial = /* @__PURE__ */ shaderMaterial(
-  { scale: 1.0, point_ball_norm: 0.0 },
+  {
+    scale: 1.0,
+    point_ball_norm: 0.0,
+    uniformColor: new THREE.Color(1, 1, 1),
+  },
   `
+  precision mediump float;
+
   varying vec3 vPosition;
   varying vec3 vColor; // in the vertex shader
   uniform float scale;
+  uniform vec3 uniformColor;
 
   void main() {
       vPosition = position;
+      #ifdef USE_COLOR
       vColor = color;
+      #else
+      vColor = uniformColor;
+      #endif
       vec4 world_pos = modelViewMatrix * vec4(position, 1.0);
       gl_Position = projectionMatrix * world_pos;
       gl_PointSize = (scale / -world_pos.z);
@@ -65,6 +44,7 @@ const PointCloudMaterial = /* @__PURE__ */ shaderMaterial(
   `varying vec3 vPosition;
   varying vec3 vColor;
   uniform float point_ball_norm;
+  uniform vec3 uniformColor;
 
   void main() {
       if (point_ball_norm < 1000.0) {
@@ -79,166 +59,123 @@ const PointCloudMaterial = /* @__PURE__ */ shaderMaterial(
    `,
 );
 
-export const PointCloud = React.forwardRef<
-  THREE.Points,
-  {
-    pointSize: number;
-    /** We visualize each point as a 2D ball, which is defined by some norm. */
-    pointBallNorm: number;
-    points: Float32Array;
-    colors: Float32Array;
-  }
->(function PointCloud(props, ref) {
-  const getThreeState = useThree((state) => state.get);
+export const PointCloud = React.forwardRef<THREE.Points, PointCloudMessage>(
+  function PointCloud(message, ref) {
+    const getThreeState = useThree((state) => state.get);
 
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute(props.points, 3),
-  );
-  geometry.computeBoundingSphere();
-  geometry.setAttribute(
-    "color",
-    new THREE.Float32BufferAttribute(props.colors, 3),
-  );
+    const props = message.props;
 
-  const [material] = React.useState(
-    () => new PointCloudMaterial({ vertexColors: true }),
-  );
-  material.uniforms.scale.value = 10.0;
-  material.uniforms.point_ball_norm.value = props.pointBallNorm;
+    // Create geometry using useMemo for better performance.
+    const geometry = React.useMemo(() => {
+      const geometry = new THREE.BufferGeometry();
 
-  React.useEffect(() => {
-    return () => {
-      material.dispose();
-      geometry.dispose();
-    };
-  });
+      if (message.props.precision === "float16") {
+        geometry.setAttribute(
+          "position",
+          new THREE.Float16BufferAttribute(
+            new Uint16Array(
+              props.points.buffer.slice(
+                props.points.byteOffset,
+                props.points.byteOffset + props.points.byteLength,
+              ),
+            ),
+            3,
+          ),
+        );
+      } else {
+        geometry.setAttribute(
+          "position",
+          new THREE.Float32BufferAttribute(
+            new Float32Array(
+              props.points.buffer.slice(
+                props.points.byteOffset,
+                props.points.byteOffset + props.points.byteLength,
+              ),
+            ),
+            3,
+          ),
+        );
+      }
 
-  const rendererSize = new THREE.Vector2();
-  useFrame(() => {
-    // Match point scale to behavior of THREE.PointsMaterial().
-    if (material === undefined) return;
-    // point px height / actual height = point meters height / frustum meters height
-    // frustum meters height = math.tan(fov / 2.0) * z
-    // point px height = (point meters height / math.tan(fov / 2.0) * actual height)  / z
-    material.uniforms.scale.value =
-      (props.pointSize /
-        Math.tan(
-          (((getThreeState().camera as THREE.PerspectiveCamera).fov / 180.0) *
-            Math.PI) /
-            2.0,
-        )) *
-      getThreeState().gl.getSize(rendererSize).height *
-      getThreeState().gl.getPixelRatio();
-  });
-  return <points ref={ref} geometry={geometry} material={material} />;
-});
+      // Add color attribute if needed.
+      if (props.colors.length > 3) {
+        geometry.setAttribute(
+          "color",
+          new THREE.BufferAttribute(new Uint8Array(props.colors), 3, true),
+        );
+      } else if (props.colors.length < 3) {
+        console.error(
+          `Invalid color buffer length, got ${props.colors.length}`,
+        );
+      }
 
-/** Component for rendering the contents of GLB files. */
-export const GlbAsset = React.forwardRef<
-  THREE.Group,
-  { glb_data: Uint8Array; scale: number }
->(function GlbAsset({ glb_data, scale }, ref) {
-  // We track both the GLTF asset itself and all meshes within it. Meshes are
-  // used for hover effects.
-  const [gltf, setGltf] = React.useState<GLTF>();
-  const [meshes, setMeshes] = React.useState<THREE.Mesh[]>([]);
+      return geometry;
+    }, [props.points, props.colors]);
 
-  // glTF/GLB files support animations.
-  const mixerRef = React.useRef<THREE.AnimationMixer | null>(null);
+    // Create material using useMemo for better performance.
+    const material = React.useMemo(() => {
+      const material = new PointCloudMaterial();
 
-  React.useEffect(() => {
-    const loader = new GLTFLoader();
+      if (props.colors.length > 3) {
+        material.vertexColors = true;
+      } else {
+        material.vertexColors = false;
+        material.uniforms.uniformColor.value = new THREE.Color(
+          props.colors[0] / 255.0,
+          props.colors[1] / 255.0,
+          props.colors[2] / 255.0,
+        );
+      }
 
-    // We use a CDN for Draco. We could move this locally if we want to use Viser offline.
-    const dracoLoader = new DRACOLoader();
-    dracoLoader.setDecoderPath("https://www.gstatic.com/draco/v1/decoders/");
-    loader.setDRACOLoader(dracoLoader);
+      return material;
+    }, [props.colors]);
 
-    loader.parse(
-      glb_data.buffer,
-      "",
-      (gltf) => {
-        if (gltf.animations && gltf.animations.length) {
-          mixerRef.current = new THREE.AnimationMixer(gltf.scene);
-          gltf.animations.forEach((clip) => {
-            mixerRef.current!.clipAction(clip).play();
-          });
-        }
-        const meshes: THREE.Mesh[] = [];
-        gltf?.scene.traverse((obj) => {
-          if (obj instanceof THREE.Mesh) meshes.push(obj);
-        });
-        setMeshes(meshes);
-        setGltf(gltf);
-      },
-      (error) => {
-        console.log("Error loading GLB!");
-        console.log(error);
-      },
+    // Clean up resources when component unmounts.
+    React.useEffect(() => {
+      return () => {
+        geometry.dispose();
+        material.dispose();
+      };
+    }, [geometry, material]);
+
+    // Update material properties with point_ball_norm
+    React.useEffect(() => {
+      material.uniforms.scale.value = 10.0;
+      material.uniforms.point_ball_norm.value = {
+        square: Infinity,
+        diamond: 1.0,
+        circle: 2.0,
+        rounded: 3.0,
+        sparkle: 0.6,
+      }[props.point_shape];
+    }, [props.point_shape, material]);
+
+    const rendererSize = new THREE.Vector2();
+    useFrame(() => {
+      // Match point scale to behavior of THREE.PointsMaterial().
+      // point px height / actual height = point meters height / frustum meters height
+      // frustum meters height = math.tan(fov / 2.0) * z
+      // point px height = (point meters height / math.tan(fov / 2.0) * actual height)  / z
+      material.uniforms.scale.value =
+        (props.point_size /
+          Math.tan(
+            (((getThreeState().camera as THREE.PerspectiveCamera).fov / 180.0) *
+              Math.PI) /
+              2.0,
+          )) *
+        getThreeState().gl.getSize(rendererSize).height *
+        getThreeState().gl.getPixelRatio();
+    });
+    return (
+      <points
+        frustumCulled={false}
+        ref={ref}
+        geometry={geometry}
+        material={material}
+      />
     );
-
-    return () => {
-      if (mixerRef.current) mixerRef.current.stopAllAction();
-
-      function disposeNode(node: any) {
-        if (node instanceof THREE.Mesh) {
-          if (node.geometry) {
-            node.geometry.dispose();
-          }
-          if (node.material) {
-            if (Array.isArray(node.material)) {
-              node.material.forEach((material) => {
-                disposeMaterial(material);
-              });
-            } else {
-              disposeMaterial(node.material);
-            }
-          }
-        }
-      }
-      function disposeMaterial(material: AllPossibleThreeJSMaterials) {
-        if ("map" in material) material.map?.dispose();
-        if ("lightMap" in material) material.lightMap?.dispose();
-        if ("bumpMap" in material) material.bumpMap?.dispose();
-        if ("normalMap" in material) material.normalMap?.dispose();
-        if ("specularMap" in material) material.specularMap?.dispose();
-        if ("envMap" in material) material.envMap?.dispose();
-        if ("alphaMap" in material) material.alphaMap?.dispose();
-        if ("aoMap" in material) material.aoMap?.dispose();
-        if ("displacementMap" in material) material.displacementMap?.dispose();
-        if ("emissiveMap" in material) material.emissiveMap?.dispose();
-        if ("gradientMap" in material) material.gradientMap?.dispose();
-        if ("metalnessMap" in material) material.metalnessMap?.dispose();
-        if ("roughnessMap" in material) material.roughnessMap?.dispose();
-        material.dispose(); // disposes any programs associated with the material
-      }
-
-      // Attempt to free resources.
-      gltf?.scene.traverse(disposeNode);
-    };
-  }, [glb_data]);
-
-  useFrame((_, delta) => {
-    if (mixerRef.current) {
-      mixerRef.current.update(delta);
-    }
-  });
-
-  return (
-    <group ref={ref}>
-      {gltf === undefined ? null : (
-        <>
-          <primitive object={gltf.scene} scale={scale} />
-          {meshes.map((mesh) =>
-            createPortal(<OutlinesIfHovered alwaysMounted />, mesh),
-          )}
-        </>
-      )}
-    </group>
-  );
-});
+  },
+);
 
 /** Helper for adding coordinate frames as scene nodes. */
 export const CoordinateFrame = React.forwardRef<
@@ -248,6 +185,7 @@ export const CoordinateFrame = React.forwardRef<
     axesLength?: number;
     axesRadius?: number;
     originRadius?: number;
+    originColor?: number;
   }
 >(function CoordinateFrame(
   {
@@ -255,6 +193,7 @@ export const CoordinateFrame = React.forwardRef<
     axesLength = 0.5,
     axesRadius = 0.0125,
     originRadius = undefined,
+    originColor = 0xecec00,
   },
   ref,
 ) {
@@ -265,9 +204,9 @@ export const CoordinateFrame = React.forwardRef<
         <>
           <mesh
             geometry={originGeom}
-            material={originMaterial}
             scale={new THREE.Vector3(originRadius, originRadius, originRadius)}
           >
+            <meshBasicMaterial color={originColor} />
             <OutlinesIfHovered />
           </mesh>
           <Instances limit={3}>
@@ -301,185 +240,340 @@ export const CoordinateFrame = React.forwardRef<
 export const InstancedAxes = React.forwardRef<
   THREE.Group,
   {
-    wxyzsBatched: Float32Array;
-    positionsBatched: Float32Array;
+    /** Raw bytes containing float32 quaternion values (wxyz) */
+    batched_wxyzs: Uint8Array;
+    /** Raw bytes containing float32 position values (xyz) */
+    batched_positions: Uint8Array;
     axes_length?: number;
     axes_radius?: number;
   }
 >(function InstancedAxes(
-  {
-    wxyzsBatched: instance_wxyzs,
-    positionsBatched: instance_positions,
-    axes_length = 0.5,
-    axes_radius = 0.0125,
-  },
+  { batched_wxyzs, batched_positions, axes_length = 0.5, axes_radius = 0.0125 },
   ref,
 ) {
   const axesRef = React.useRef<THREE.InstancedMesh>(null);
 
-  const cylinderGeom = new THREE.CylinderGeometry(
-    axes_radius,
-    axes_radius,
-    axes_length,
-    16,
+  // Create geometry and material using useMemo.
+  const cylinderGeom = React.useMemo(
+    () => new THREE.CylinderGeometry(axes_radius, axes_radius, axes_length, 16),
+    [axes_radius, axes_length],
   );
-  const material = new MeshBasicMaterial();
 
-  // Dispose when done.
+  const material = React.useMemo(() => new MeshBasicMaterial(), []);
+
+  // Dispose resources when component unmounts.
   React.useEffect(() => {
     return () => {
       cylinderGeom.dispose();
       material.dispose();
     };
-  });
+  }, [cylinderGeom, material]);
+
+  // Pre-compute transformation matrices for axes using useMemo.
+  const axesTransformations = React.useMemo(() => {
+    return {
+      T_frame_framex: new THREE.Matrix4()
+        .makeRotationFromEuler(new THREE.Euler(0.0, 0.0, (3.0 * Math.PI) / 2.0))
+        .setPosition(0.5 * axes_length, 0.0, 0.0),
+      T_frame_framey: new THREE.Matrix4()
+        .makeRotationFromEuler(new THREE.Euler(0.0, 0.0, 0.0))
+        .setPosition(0.0, 0.5 * axes_length, 0.0),
+      T_frame_framez: new THREE.Matrix4()
+        .makeRotationFromEuler(new THREE.Euler(Math.PI / 2.0, 0.0, 0.0))
+        .setPosition(0.0, 0.0, 0.5 * axes_length),
+      red: new THREE.Color(0xcc0000),
+      green: new THREE.Color(0x00cc00),
+      blue: new THREE.Color(0x0000cc),
+    };
+  }, [axes_length]);
 
   // Update instance matrices and colors.
   React.useEffect(() => {
+    if (!axesRef.current) return;
+
     // Pre-allocate to avoid garbage collector from running during loop.
     const T_world_frame = new THREE.Matrix4();
     const T_world_framex = new THREE.Matrix4();
     const T_world_framey = new THREE.Matrix4();
     const T_world_framez = new THREE.Matrix4();
-
-    const T_frame_framex = new THREE.Matrix4()
-      .makeRotationFromEuler(new THREE.Euler(0.0, 0.0, (3.0 * Math.PI) / 2.0))
-      .setPosition(0.5 * axes_length, 0.0, 0.0);
-    const T_frame_framey = new THREE.Matrix4()
-      .makeRotationFromEuler(new THREE.Euler(0.0, 0.0, 0.0))
-      .setPosition(0.0, 0.5 * axes_length, 0.0);
-    const T_frame_framez = new THREE.Matrix4()
-      .makeRotationFromEuler(new THREE.Euler(Math.PI / 2.0, 0.0, 0.0))
-      .setPosition(0.0, 0.0, 0.5 * axes_length);
-
     const tmpQuat = new THREE.Quaternion();
 
-    const red = new THREE.Color(0xcc0000);
-    const green = new THREE.Color(0x00cc00);
-    const blue = new THREE.Color(0x0000cc);
+    const { T_frame_framex, T_frame_framey, T_frame_framez, red, green, blue } =
+      axesTransformations;
 
-    for (let i = 0; i < instance_wxyzs.length / 4; i++) {
+    // Create DataViews to read float values directly.
+    const positionsView = new DataView(
+      batched_positions.buffer,
+      batched_positions.byteOffset,
+      batched_positions.byteLength,
+    );
+
+    const wxyzsView = new DataView(
+      batched_wxyzs.buffer,
+      batched_wxyzs.byteOffset,
+      batched_wxyzs.byteLength,
+    );
+
+    // Calculate number of instances.
+    const numInstances = batched_wxyzs.byteLength / (4 * 4); // 4 floats, 4 bytes per float
+
+    for (let i = 0; i < numInstances; i++) {
+      // Calculate byte offsets for reading float values.
+      const posOffset = i * 3 * 4; // 3 floats, 4 bytes per float
+      const wxyzOffset = i * 4 * 4; // 4 floats, 4 bytes per float
+
+      // Set position from DataView.
       T_world_frame.makeRotationFromQuaternion(
         tmpQuat.set(
-          instance_wxyzs[i * 4 + 1],
-          instance_wxyzs[i * 4 + 2],
-          instance_wxyzs[i * 4 + 3],
-          instance_wxyzs[i * 4 + 0],
+          wxyzsView.getFloat32(wxyzOffset + 4, true), // x
+          wxyzsView.getFloat32(wxyzOffset + 8, true), // y
+          wxyzsView.getFloat32(wxyzOffset + 12, true), // z
+          wxyzsView.getFloat32(wxyzOffset, true), // w (first value)
         ),
       ).setPosition(
-        instance_positions[i * 3 + 0],
-        instance_positions[i * 3 + 1],
-        instance_positions[i * 3 + 2],
+        positionsView.getFloat32(posOffset, true), // x
+        positionsView.getFloat32(posOffset + 4, true), // y
+        positionsView.getFloat32(posOffset + 8, true), // z
       );
+
       T_world_framex.copy(T_world_frame).multiply(T_frame_framex);
       T_world_framey.copy(T_world_frame).multiply(T_frame_framey);
       T_world_framez.copy(T_world_frame).multiply(T_frame_framez);
 
-      axesRef.current!.setMatrixAt(i * 3 + 0, T_world_framex);
-      axesRef.current!.setMatrixAt(i * 3 + 1, T_world_framey);
-      axesRef.current!.setMatrixAt(i * 3 + 2, T_world_framez);
+      axesRef.current.setMatrixAt(i * 3 + 0, T_world_framex);
+      axesRef.current.setMatrixAt(i * 3 + 1, T_world_framey);
+      axesRef.current.setMatrixAt(i * 3 + 2, T_world_framez);
 
-      axesRef.current!.setColorAt(i * 3 + 0, red);
-      axesRef.current!.setColorAt(i * 3 + 1, green);
-      axesRef.current!.setColorAt(i * 3 + 2, blue);
+      axesRef.current.setColorAt(i * 3 + 0, red);
+      axesRef.current.setColorAt(i * 3 + 1, green);
+      axesRef.current.setColorAt(i * 3 + 2, blue);
     }
-    axesRef.current!.instanceMatrix.needsUpdate = true;
-    axesRef.current!.instanceColor!.needsUpdate = true;
-  }, [instance_wxyzs, instance_positions]);
+    axesRef.current.instanceMatrix.needsUpdate = true;
+    axesRef.current.instanceColor!.needsUpdate = true;
+  }, [batched_wxyzs, batched_positions, axesTransformations]);
+
+  // Create cylinder geometries for outlines - one for each axis.
+  const outlineCylinderGeom = React.useMemo(
+    () => new THREE.CylinderGeometry(axes_radius, axes_radius, axes_length, 16),
+    [axes_radius, axes_length],
+  );
+
+  // Compute transform matrices for each axis.
+  const xAxisTransform = React.useMemo(
+    () => ({
+      position: new THREE.Vector3(0.5 * axes_length, 0, 0),
+      rotation: new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(0, 0, (3 * Math.PI) / 2),
+      ),
+      scale: new THREE.Vector3(1, 1, 1),
+    }),
+    [axes_length],
+  );
+
+  const yAxisTransform = React.useMemo(
+    () => ({
+      position: new THREE.Vector3(0, 0.5 * axes_length, 0),
+      rotation: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 0)),
+      scale: new THREE.Vector3(1, 1, 1),
+    }),
+    [axes_length],
+  );
+
+  const zAxisTransform = React.useMemo(
+    () => ({
+      position: new THREE.Vector3(0, 0, 0.5 * axes_length),
+      rotation: new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(Math.PI / 2, 0, 0),
+      ),
+      scale: new THREE.Vector3(1, 1, 1),
+    }),
+    [axes_length],
+  );
+
+  // Calculate number of instances for args.
+  const numInstances = (batched_wxyzs.byteLength / (4 * 4)) * 3; // 4 floats per WXYZ * 4 bytes per float * 3 axes
 
   return (
     <group ref={ref}>
       <instancedMesh
         ref={axesRef}
-        args={[cylinderGeom, material, (instance_wxyzs.length / 4) * 3]}
-      >
-        <OutlinesIfHovered />
-      </instancedMesh>
+        args={[cylinderGeom, material, numInstances]}
+      />
+
+      {/* Create hover outlines for each axis */}
+      <BatchedMeshHoverOutlines
+        geometry={outlineCylinderGeom}
+        batched_positions={batched_positions}
+        batched_wxyzs={batched_wxyzs}
+        meshTransform={xAxisTransform}
+        computeBatchIndexFromInstanceIndex={(instanceId) =>
+          Math.floor(instanceId / 3)
+        }
+      />
+
+      <BatchedMeshHoverOutlines
+        geometry={outlineCylinderGeom}
+        batched_positions={batched_positions}
+        batched_wxyzs={batched_wxyzs}
+        meshTransform={yAxisTransform}
+        computeBatchIndexFromInstanceIndex={(instanceId) =>
+          Math.floor(instanceId / 3)
+        }
+      />
+
+      <BatchedMeshHoverOutlines
+        geometry={outlineCylinderGeom}
+        batched_positions={batched_positions}
+        batched_wxyzs={batched_wxyzs}
+        meshTransform={zAxisTransform}
+        computeBatchIndexFromInstanceIndex={(instanceId) =>
+          Math.floor(instanceId / 3)
+        }
+      />
     </group>
   );
 });
+
+export const ViserImage = React.forwardRef<THREE.Group, ImageMessage>(
+  function ViserImage(message, ref) {
+    // We can't use useMemo here because TextureLoader.load is asynchronous.
+    // And we need to use setState to update the texture after loading.
+    const [imageTexture, setImageTexture] = React.useState<THREE.Texture>();
+
+    React.useEffect(() => {
+      if (message.props.media_type !== null && message.props._data !== null) {
+        const image_url = URL.createObjectURL(new Blob([message.props._data]));
+        new THREE.TextureLoader().load(image_url, (texture) => {
+          setImageTexture(texture);
+          URL.revokeObjectURL(image_url);
+        });
+      }
+    }, [message.props.media_type, message.props._data]);
+    return (
+      <group ref={ref}>
+        <mesh
+          rotation={new THREE.Euler(Math.PI, 0.0, 0.0)}
+          castShadow={message.props.cast_shadow}
+          receiveShadow={message.props.receive_shadow}
+        >
+          <OutlinesIfHovered />
+          <planeGeometry
+            attach="geometry"
+            args={[message.props.render_width, message.props.render_height]}
+          />
+          <meshBasicMaterial
+            attach="material"
+            transparent={true}
+            side={THREE.DoubleSide}
+            map={imageTexture}
+            toneMapped={false}
+          />
+        </mesh>
+      </group>
+    );
+  },
+);
+
 /** Helper for visualizing camera frustums. */
 export const CameraFrustum = React.forwardRef<
   THREE.Group,
-  {
-    fov: number;
-    aspect: number;
-    scale: number;
-    color: number;
-    image?: THREE.Texture;
-  }
->(function CameraFrustum(props, ref) {
-  let y = Math.tan(props.fov / 2.0);
-  let x = y * props.aspect;
+  CameraFrustumMessage
+>(function CameraFrustum(message, ref) {
+  // We can't use useMemo here because TextureLoader.load is asynchronous.
+  // And we need to use setState to update the texture after loading.
+  const [imageTexture, setImageTexture] = React.useState<THREE.Texture>();
+
+  React.useEffect(() => {
+    if (
+      message.props.image_media_type !== null &&
+      message.props._image_data !== null
+    ) {
+      const image_url = URL.createObjectURL(
+        new Blob([message.props._image_data]),
+      );
+      new THREE.TextureLoader().load(image_url, (texture) => {
+        setImageTexture(texture);
+        URL.revokeObjectURL(image_url);
+      });
+    } else {
+      setImageTexture(undefined);
+    }
+  }, [message.props.image_media_type, message.props._image_data]);
+
+  let y = Math.tan(message.props.fov / 2.0);
+  let x = y * message.props.aspect;
   let z = 1.0;
 
   const volumeScale = Math.cbrt((x * y * z) / 3.0);
   x /= volumeScale;
   y /= volumeScale;
   z /= volumeScale;
+  x *= message.props.scale;
+  y *= message.props.scale;
+  z *= message.props.scale;
 
-  function scaledLineSegments(points: [number, number, number][]) {
-    points = points.map((xyz) => [xyz[0] * x, xyz[1] * y, xyz[2] * z]);
-    return [...Array(points.length - 1).keys()].map((i) => (
-      <LineSegmentInstance
-        key={i}
-        start={new THREE.Vector3()
-          .fromArray(points[i])
-          .multiplyScalar(props.scale)}
-        end={new THREE.Vector3()
-          .fromArray(points[i + 1])
-          .multiplyScalar(props.scale)}
-        color={props.color}
-      />
-    ));
-  }
+  const hoveredRef = React.useContext(HoverableContext);
+  const [isHovered, setIsHovered] = React.useState(false);
+
+  useFrame(() => {
+    if (hoveredRef !== null && hoveredRef.current.isHovered !== isHovered) {
+      setIsHovered(hoveredRef.current.isHovered);
+    }
+  });
+
+  const frustumPoints: [number, number, number][] = [
+    // Rectangle.
+    [-1, -1, 1],
+    [1, -1, 1],
+    [1, -1, 1],
+    [1, 1, 1],
+    [1, 1, 1],
+    [-1, 1, 1],
+    [-1, 1, 1],
+    [-1, -1, 1],
+    // Lines to origin.
+    [-1, -1, 1],
+    [0, 0, 0],
+    [0, 0, 0],
+    [1, -1, 1],
+    // Lines to origin.
+    [-1, 1, 1],
+    [0, 0, 0],
+    [0, 0, 0],
+    [1, 1, 1],
+    // Up direction indicator.
+    // Don't overlap with the image if the image is present.
+    [0.0, -1.2, 1.0],
+    imageTexture === undefined ? [0.0, -0.9, 1.0] : [0.0, -1.0, 1.0],
+  ].map((xyz) => [xyz[0] * x, xyz[1] * y, xyz[2] * z]);
 
   return (
     <group ref={ref}>
-      <Instances limit={9}>
-        <meshBasicMaterial color={props.color} side={THREE.DoubleSide} />
-        <cylinderGeometry
-          args={[props.scale * 0.03, props.scale * 0.03, 1.0, 3]}
-        />
-        {scaledLineSegments([
-          // Rectangle.
-          [-1, -1, 1],
-          [1, -1, 1],
-          [1, 1, 1],
-          [-1, 1, 1],
-          [-1, -1, 1],
-        ])}
-        {scaledLineSegments([
-          // Lines to origin.
-          [-1, -1, 1],
-          [0, 0, 0],
-          [1, -1, 1],
-        ])}
-        {scaledLineSegments([
-          // Lines to origin.
-          [-1, 1, 1],
-          [0, 0, 0],
-          [1, 1, 1],
-        ])}
-        {scaledLineSegments([
-          // Up direction.
-          [0.0, -1.2, 1.0],
-          [0.0, -0.9, 1.0],
-        ])}
-      </Instances>
-      {props.image && (
+      <Line
+        points={frustumPoints}
+        color={isHovered ? 0xfbff00 : rgbToInt(message.props.color)}
+        lineWidth={
+          isHovered ? 1.5 * message.props.line_width : message.props.line_width
+        }
+        segments
+      />
+      {imageTexture && (
         <mesh
-          position={[0.0, 0.0, props.scale * z]}
+          // 0.999999 is to avoid z-fighting with the frustum lines.
+          position={[0.0, 0.0, z * 0.999999]}
           rotation={new THREE.Euler(Math.PI, 0.0, 0.0)}
+          castShadow={message.props.cast_shadow}
+          receiveShadow={message.props.receive_shadow}
         >
           <planeGeometry
             attach="geometry"
-            args={[props.scale * props.aspect * y * 2, props.scale * y * 2]}
+            args={[message.props.aspect * y * 2, y * 2]}
           />
           <meshBasicMaterial
             attach="material"
             transparent={true}
             side={THREE.DoubleSide}
-            map={props.image}
+            map={imageTexture}
             toneMapped={false}
           />
         </mesh>
@@ -487,74 +581,3 @@ export const CameraFrustum = React.forwardRef<
     </group>
   );
 });
-
-function LineSegmentInstance(props: {
-  start: THREE.Vector3;
-  end: THREE.Vector3;
-  color: number;
-}) {
-  const desiredDirection = new THREE.Vector3()
-    .subVectors(props.end, props.start)
-    .normalize();
-  const canonicalDirection = new THREE.Vector3(0.0, 1.0, 0.0);
-  const orientation = new THREE.Quaternion().setFromUnitVectors(
-    canonicalDirection,
-    desiredDirection,
-  );
-
-  const length = props.start.distanceTo(props.end);
-  const midpoint = new THREE.Vector3()
-    .addVectors(props.start, props.end)
-    .divideScalar(2.0);
-
-  return (
-    <Instance
-      position={midpoint}
-      quaternion={orientation}
-      scale={[1.0, length, 1.0]}
-    >
-      <OutlinesIfHovered creaseAngle={0.0} />
-    </Instance>
-  );
-}
-
-export const HoverableContext =
-  React.createContext<React.MutableRefObject<boolean> | null>(null);
-
-/** Outlines object, which should be placed as a child of all meshes that might
- * be clickable. */
-export function OutlinesIfHovered(
-  props: { alwaysMounted?: boolean; creaseAngle?: number } = {
-    // Can be set to true for objects like meshes which may be slow to mount.
-    // It seems better to set to False for instanced meshes, there may be some
-    // drei or fiber-related race conditions...
-    alwaysMounted: false,
-    // Some thing just look better with no creasing, like camera frustum objects.
-    creaseAngle: Math.PI,
-  },
-) {
-  const groupRef = React.useRef<THREE.Group>(null);
-  const hoveredRef = React.useContext(HoverableContext);
-  const [mounted, setMounted] = React.useState(true);
-
-  useFrame(() => {
-    if (hoveredRef === null) return;
-    if (props.alwaysMounted) {
-      if (groupRef.current === null) return;
-      groupRef.current.visible = hoveredRef.current;
-    } else if (hoveredRef.current != mounted) {
-      setMounted(hoveredRef.current);
-    }
-  });
-  return hoveredRef === null || !mounted ? null : (
-    <Outlines
-      ref={groupRef}
-      thickness={10}
-      screenspace={true}
-      color={0xfbff00}
-      opacity={0.8}
-      transparent={true}
-      angle={props.creaseAngle}
-    />
-  );
-}
