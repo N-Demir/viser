@@ -1,3 +1,4 @@
+.yarn*
 *.swp
 *.swo
 *.pyc
