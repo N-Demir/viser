@@ -96,6 +96,21 @@ export function SynchronizedCameraControls() {
 
   const cameraControlRef = viewer.cameraControlRef;
 
+  // Parse camera speed parameter *before* defining sendCamera.
+  const searchParams = new URLSearchParams(window.location.search);
+  const initialCameraSpeedString = searchParams.get("initialCameraSpeed");
+  let initialCameraSpeed = 0.002;
+  if (initialCameraSpeedString) {
+    const parsedSpeed = parseFloat(initialCameraSpeedString);
+    if (!isNaN(parsedSpeed) && parsedSpeed > 0) {
+      initialCameraSpeed = parsedSpeed;
+    } else {
+      console.warn(
+        `Invalid initialCameraSpeed parameter: ${initialCameraSpeedString}. Using default.`,
+      );
+    }
+  }
+
   // Animation state interface
   interface CameraAnimation {
     startUp: THREE.Vector3;
@@ -333,15 +348,15 @@ export function SynchronizedCameraControls() {
           )},${lookAt.z.toFixed(3)}` +
           `&initialCameraUp=${up.x.toFixed(3)},${up.y.toFixed(
             3,
-          )},${up.z.toFixed(3)}`,
+          )},${up.z.toFixed(3)}` +
+          `&initialCameraSpeed=${initialCameraSpeed.toFixed(5)}`,
       );
     }
-  }, [camera, sendCameraThrottled]);
+  }, [camera, sendCameraThrottled, initialCameraSpeed]);
 
   // Camera control search parameters.
   // EXPERIMENTAL: these may be removed or renamed in the future. Please pin to
   // a commit/version if you're relying on this (undocumented) feature.
-  const searchParams = new URLSearchParams(window.location.search);
   const initialCameraPosString = searchParams.get("initialCameraPosition");
   const initialCameraLookAtString = searchParams.get("initialCameraLookAt");
   const initialCameraUpString = searchParams.get("initialCameraUp");
@@ -426,6 +441,9 @@ export function SynchronizedCameraControls() {
   React.useEffect(() => {
     const cameraControls = viewer.cameraControlRef.current!;
 
+    // Use the parsed or default speed.
+    const KEYBOARD_MOVE_SPEED = initialCameraSpeed;
+
     const wKey = new holdEvent.KeyboardKeyHold("KeyW", 20);
     const aKey = new holdEvent.KeyboardKeyHold("KeyA", 20);
     const sKey = new holdEvent.KeyboardKeyHold("KeyS", 20);
@@ -436,22 +454,22 @@ export function SynchronizedCameraControls() {
     // TODO: these event listeners are currently never removed, even if this
     // component gets unmounted.
     aKey.addEventListener("holding", (event) => {
-      cameraControls.truck(-0.002 * event?.deltaTime, 0, true);
+      cameraControls.truck(-KEYBOARD_MOVE_SPEED * event?.deltaTime, 0, true);
     });
     dKey.addEventListener("holding", (event) => {
-      cameraControls.truck(0.002 * event?.deltaTime, 0, true);
+      cameraControls.truck(KEYBOARD_MOVE_SPEED * event?.deltaTime, 0, true);
     });
     wKey.addEventListener("holding", (event) => {
-      cameraControls.forward(0.002 * event?.deltaTime, true);
+      cameraControls.forward(KEYBOARD_MOVE_SPEED * event?.deltaTime, true);
     });
     sKey.addEventListener("holding", (event) => {
-      cameraControls.forward(-0.002 * event?.deltaTime, true);
+      cameraControls.forward(-KEYBOARD_MOVE_SPEED * event?.deltaTime, true);
     });
     qKey.addEventListener("holding", (event) => {
-      cameraControls.elevate(-0.002 * event?.deltaTime, true);
+      cameraControls.elevate(-KEYBOARD_MOVE_SPEED * event?.deltaTime, true);
     });
     eKey.addEventListener("holding", (event) => {
-      cameraControls.elevate(0.002 * event?.deltaTime, true);
+      cameraControls.elevate(KEYBOARD_MOVE_SPEED * event?.deltaTime, true);
     });
 
     const leftKey = new holdEvent.KeyboardKeyHold("ArrowLeft", 20);
@@ -507,7 +525,7 @@ export function SynchronizedCameraControls() {
         makeDefault
       />
       <OrbitOriginTool
-        forceShow={logCamera !== null /* Always show if logging camera */}
+        forceShow={false} //{logCamera !== null /* Always show if logging camera */}
         pivotRef={pivotRef}
         onPivotChange={(matrix) => {
           updateCameraLookAtAndUpFromPivotControl(matrix);

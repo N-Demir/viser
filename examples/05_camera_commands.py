@@ -15,6 +15,82 @@ server = viser.ViserServer()
 num_frames = 20
 
 
+def turn_tensor_into_string(tensor: np.ndarray) -> str:
+    return f"{', '.join([f'{x:.2f}' for x in tensor])}"
+
+
+def add_camera_position_gui(client: viser.ClientHandle) -> None:
+    """Add GUI elements for adjusting the camera position."""
+
+    camera_position_text = client.gui.add_text(
+        label="Camera Position",
+        initial_value=turn_tensor_into_string(client.camera.position),
+    )
+
+    @client.camera.on_update
+    def _(_) -> None:
+        camera_position_text.value = turn_tensor_into_string(client.camera.position)
+
+    camera_position_set_button = client.gui.add_button(
+        label="Set",
+    )
+
+    @camera_position_set_button.on_click
+    def _(_) -> None:
+        client.camera.position = np.array(
+            [float(x) for x in camera_position_text.value.split(",")], dtype=np.float32
+        )
+
+
+def add_camera_up_direction_gui(client: viser.ClientHandle) -> None:
+    """Add GUI elements for adjusting the camera up direction."""
+
+    camera_up_direction_text = client.gui.add_text(
+        label="Camera Up Direction",
+        initial_value=turn_tensor_into_string(client.camera.up_direction),
+    )
+
+    @client.camera.on_update
+    def _(_) -> None:
+        camera_up_direction_text.value = turn_tensor_into_string(
+            client.camera.up_direction
+        )
+
+    camera_up_direction_set_button = client.gui.add_button(
+        label="Set",
+    )
+
+    @camera_up_direction_set_button.on_click
+    def _(_) -> None:
+        client.camera.up_direction = np.array(
+            [float(x) for x in camera_up_direction_text.value.split(",")],
+            dtype=np.float32,
+        )
+
+
+def add_camera_look_at_gui(client: viser.ClientHandle) -> None:
+    """Add GUI elements for adjusting the camera look at."""
+
+    camera_look_at_text = client.gui.add_text(
+        label="Camera Look At",
+        initial_value=turn_tensor_into_string(client.camera.look_at),
+    )
+
+    @client.camera.on_update
+    def _(_) -> None:
+        camera_look_at_text.value = turn_tensor_into_string(client.camera.look_at)
+
+    camera_look_at_set_button = client.gui.add_button(
+        label="Set",
+    )
+
+    @camera_look_at_set_button.on_click
+    def _(_) -> None:
+        client.camera.look_at = np.array(
+            [float(x) for x in camera_look_at_text.value.split(",")], dtype=np.float32
+        )
+
+
 @server.on_client_connect
 def _(client: viser.ClientHandle) -> None:
     """For each client that connects, create GUI elements for adjusting the
@@ -36,6 +112,10 @@ def _(client: viser.ClientHandle) -> None:
     @far_slider.on_update
     def _(_) -> None:
         client.camera.far = far_slider.value
+
+    add_camera_position_gui(client)
+    add_camera_up_direction_gui(client)
+    add_camera_look_at_gui(client)
 
 
 @server.on_client_connect
