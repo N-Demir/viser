@@ -66,6 +66,7 @@ examples = [
     "gdown>=4.6.6",
     "plyfile",
     "opencv-python",
+    "jaxtyping",
     "pyliblzfse>=0.4.1; platform_system!='Windows'",
 ]
 
