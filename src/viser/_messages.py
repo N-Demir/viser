@@ -11,7 +11,7 @@ import numpy as np
 import numpy.typing as npt
 from typing_extensions import Literal, override
 
-from . import infra, theme
+from . import infra, theme, uplot
 
 
 @dataclasses.dataclass(frozen=True)
@@ -20,7 +20,7 @@ class GuiSliderMark:
     label: Optional[str]
 
 
-Color = Literal[
+LiteralColor = Literal[
     "dark",
     "gray",
     "red",
@@ -158,7 +158,7 @@ class NotificationProps:
     """Whether to show a close button. Synchronized automatically when assigned."""
     auto_close: Union[int, Literal[False]]
     """Time in milliseconds after which the notification should auto-close, or False to disable auto-close. Synchronized automatically when assigned."""
-    color: Optional[Color]
+    color: Union[LiteralColor, Tuple[int, int, int], None]
     """Color of the notification. Synchronized automatically when assigned."""
 
 
@@ -304,6 +304,8 @@ class BatchedAxesProps:
     """Float array of shape (N,4) representing quaternion rotations. Synchronized automatically when assigned."""
     batched_positions: npt.NDArray[np.float32]
     """Float array of shape (N,3) representing positions. Synchronized automatically when assigned."""
+    batched_scales: Optional[npt.NDArray[np.float32]]
+    """Float array of shape (N,) or (N,3) representing uniform or per-axis (XYZ) scales. Synchronized automatically when assigned."""
     axes_length: float
     """Length of each axis. Synchronized automatically when assigned."""
     axes_radius: float
@@ -577,6 +579,20 @@ class MeshMessage(_CreateSceneNodeMessage):
 
 
 @dataclasses.dataclass
+class BoxMessage(_CreateSceneNodeMessage):
+    """Box message."""
+
+    props: BoxProps
+
+
+@dataclasses.dataclass
+class IcosphereMessage(_CreateSceneNodeMessage):
+    """Icosphere message."""
+
+    props: IcosphereProps
+
+
+@dataclasses.dataclass
 class MeshProps:
     vertices: npt.NDArray[np.float32]
     """A numpy array of vertex positions. Should have shape (V, 3). Synchronized automatically when assigned."""
@@ -603,6 +619,52 @@ class MeshProps:
         # Check shapes.
         assert self.vertices.shape[-1] == 3
         assert self.faces.shape[-1] == 3
+
+
+@dataclasses.dataclass
+class BoxProps:
+    dimensions: Tuple[float, float, float]
+    """Dimensions of the box (x, y, z). Synchronized automatically when assigned."""
+    color: Tuple[int, int, int]
+    """Color of the box as RGB integers. Synchronized automatically when assigned."""
+    wireframe: bool
+    """Boolean indicating if the box should be rendered as a wireframe. Synchronized automatically when assigned."""
+    opacity: Optional[float]
+    """Opacity of the box. None means opaque. Synchronized automatically when assigned."""
+    flat_shading: bool
+    """Whether to do flat shading. Synchronized automatically when assigned."""
+    side: Literal["front", "back", "double"]
+    """Side of the surface to render. Synchronized automatically when assigned."""
+    material: Literal["standard", "toon3", "toon5"]
+    """Material type of the box. Synchronized automatically when assigned."""
+    cast_shadow: bool
+    """Whether or not to cast shadows. Synchronized automatically when assigned."""
+    receive_shadow: bool
+    """Whether or not to receive shadows. Synchronized automatically when assigned."""
+
+
+@dataclasses.dataclass
+class IcosphereProps:
+    radius: float
+    """Radius of the icosphere. Synchronized automatically when assigned."""
+    subdivisions: int
+    """Number of subdivisions to use when creating the icosphere. Synchronized automatically when assigned."""
+    color: Tuple[int, int, int]
+    """Color of the icosphere as RGB integers. Synchronized automatically when assigned."""
+    wireframe: bool
+    """Boolean indicating if the icosphere should be rendered as a wireframe. Synchronized automatically when assigned."""
+    opacity: Optional[float]
+    """Opacity of the icosphere. None means opaque. Synchronized automatically when assigned."""
+    flat_shading: bool
+    """Whether to do flat shading. Synchronized automatically when assigned."""
+    side: Literal["front", "back", "double"]
+    """Side of the surface to render. Synchronized automatically when assigned."""
+    material: Literal["standard", "toon3", "toon5"]
+    """Material type of the icosphere. Synchronized automatically when assigned."""
+    cast_shadow: bool
+    """Whether or not to cast shadows. Synchronized automatically when assigned."""
+    receive_shadow: bool
+    """Whether or not to receive shadows. Synchronized automatically when assigned."""
 
 
 @dataclasses.dataclass
@@ -659,6 +721,8 @@ class _BatchedMeshExtraProps:
     """Float array of shape (N, 4) representing quaternion rotations. Synchronized automatically when assigned."""
     batched_positions: npt.NDArray[np.float32]
     """Float array of shape (N, 3) representing positions. Synchronized automatically when assigned."""
+    batched_scales: Optional[npt.NDArray[np.float32]]
+    """Float array of shape (N,) or (N,3) representing uniform or per-axis (XYZ) scales. Synchronized automatically when assigned."""
     lod: Union[Literal["auto", "off"], Tuple[Tuple[float, float], ...]]
     """LOD settings. Either "auto", "off", or a tuple of (distance, ratio) pairs. Synchronized automatically when assigned."""
 
@@ -667,6 +731,11 @@ class _BatchedMeshExtraProps:
         assert self.batched_wxyzs.shape[-1] == 4
         assert self.batched_positions.shape[-1] == 3
         assert self.batched_wxyzs.shape[0] == self.batched_positions.shape[0]
+        if self.batched_scales is not None:
+            assert self.batched_scales.shape in (
+                (self.batched_wxyzs.shape[0],),
+                (self.batched_wxyzs.shape[0], 3),
+            )
 
 
 @dataclasses.dataclass
@@ -835,6 +904,20 @@ class TransformControlsUpdateMessage(Message):
 
 
 @dataclasses.dataclass
+class TransformControlsDragStartMessage(Message):
+    """Client -> server message when a transform control drag starts."""
+
+    name: str
+
+
+@dataclasses.dataclass
+class TransformControlsDragEndMessage(Message):
+    """Client -> server message when a transform control drag ends."""
+
+    name: str
+
+
+@dataclasses.dataclass
 class BackgroundImageMessage(Message):
     """Message for rendering a background image."""
 
@@ -971,7 +1054,7 @@ class GuiProgressBarProps:
     """Order value for arranging GUI elements. Synchronized automatically when assigned."""
     animated: bool
     """Whether the progress bar should be animated. Synchronized automatically when assigned."""
-    color: Optional[Color]
+    color: Union[LiteralColor, Tuple[int, int, int], None]
     """Color of the progress bar. Synchronized automatically when assigned."""
     visible: bool
     """Visibility state of the progress bar. Synchronized automatically when assigned."""
@@ -1000,6 +1083,54 @@ class GuiPlotlyProps:
 class GuiPlotlyMessage(_CreateGuiComponentMessage):
     container_uuid: str
     props: GuiPlotlyProps
+
+
+@dataclasses.dataclass
+class GuiUplotProps:
+    order: float
+    """Order value for arranging GUI elements. Synchronized automatically when assigned."""
+    data: Tuple[npt.NDArray[np.float64], ...]
+    """Tuple of 1D numpy arrays containing chart data. First array is x-axis data,
+    subsequent arrays are y-axis data for each series. All arrays must have matching
+    lengths. Minimum 2 arrays required. Synchronized automatically when assigned."""
+    mode: Union[Literal[1, 2], None]
+    """Chart layout mode: 1 = aligned (all series share axes), 2 = faceted (each series
+    gets its own subplot panel). Defaults to 1. Synchronized automatically when assigned."""
+    title: Union[str, None]
+    """Chart title displayed at the top of the plot. Synchronized automatically when assigned."""
+    series: Tuple[uplot.Series, ...]
+    """Series configuration objects defining visual appearance (colors, line styles, labels)
+    and behavior for each data array. Must match data tuple length. Synchronized automatically when assigned."""
+    bands: Union[Tuple[uplot.Band, ...], None]
+    """High/low range visualizations between adjacent series indices. Useful for confidence
+    intervals, error bounds, or min/max ranges. Synchronized automatically when assigned."""
+    scales: Union[Dict[str, uplot.Scale], None]
+    """Scale definitions controlling data-to-pixel mapping and axis ranges. Enables features
+    like auto-ranging, manual bounds, time-based scaling, and logarithmic distributions.
+    Multiple scales support dual-axis charts. Synchronized automatically when assigned."""
+    axes: Union[Tuple[uplot.Axis, ...], None]
+    """Axis configuration for positioning (top/right/bottom/left), tick formatting, grid
+    styling, and spacing. Controls visual appearance of chart axes. Synchronized automatically when assigned."""
+    legend: Union[uplot.Legend, None]
+    """Legend display options including positioning, styling, and custom value formatting
+    for hover states. Synchronized automatically when assigned."""
+    cursor: Union[uplot.Cursor, None]
+    """Interactive cursor behavior including hover detection, drag-to-zoom, and crosshair
+    appearance. Controls user interaction with the chart. Synchronized automatically when assigned."""
+    focus: Union[uplot.Focus, None]
+    """Visual highlighting when hovering over series. Controls alpha transparency of
+    non-focused series to emphasize the active one. Synchronized automatically when assigned."""
+    aspect: float
+    """Width-to-height ratio for chart display (width/height). 1.0 = square, >1.0 = wider.
+    Synchronized automatically when assigned."""
+    visible: bool
+    """Whether the chart is visible in the interface. Synchronized automatically when assigned."""
+
+
+@dataclasses.dataclass
+class GuiUplotMessage(_CreateGuiComponentMessage):
+    container_uuid: str
+    props: GuiUplotProps
 
 
 @dataclasses.dataclass
@@ -1064,7 +1195,7 @@ class GuiCloseModalMessage(Message):
 
 @dataclasses.dataclass
 class GuiButtonProps(GuiBaseProps):
-    color: Optional[Color]
+    color: Union[LiteralColor, Tuple[int, int, int], None]
     """Color of the button. Synchronized automatically when assigned."""
     _icon_html: Optional[str]
     """(Private) HTML string for the icon to be displayed on the button. Synchronized automatically when assigned."""
@@ -1079,7 +1210,7 @@ class GuiButtonMessage(_CreateGuiComponentMessage):
 
 @dataclasses.dataclass
 class GuiUploadButtonProps(GuiBaseProps):
-    color: Optional[Color]
+    color: Union[LiteralColor, Tuple[int, int, int], None]
     """Color of the upload button. Synchronized automatically when assigned."""
     _icon_html: Optional[str]
     """(Private) HTML string for the icon to be displayed on the upload button. Synchronized automatically when assigned."""
@@ -1479,12 +1610,14 @@ class FileTransferPart(Message):
 
     source_component_uuid: Optional[str]
     transfer_uuid: str
-    part: int
+    part_index: int
     content: bytes
 
     @override
     def redundancy_key(self) -> str:
-        return type(self).__name__ + "-" + self.transfer_uuid + "-" + str(self.part)
+        return (
+            type(self).__name__ + "-" + self.transfer_uuid + "-" + str(self.part_index)
+        )
 
 
 @dataclasses.dataclass

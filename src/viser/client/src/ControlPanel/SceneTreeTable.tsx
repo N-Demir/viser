@@ -6,6 +6,7 @@ import {
   IconPencil,
   IconDeviceFloppy,
   IconX,
+  IconEyeX,
 } from "@tabler/icons-react";
 import React from "react";
 import {
@@ -25,14 +26,17 @@ import {
   TextInput,
   Tooltip,
   ColorInput,
+  useMantineTheme,
+  useMantineColorScheme,
+  Popover,
 } from "@mantine/core";
 
 function EditNodeProps({
   nodeName,
-  close,
+  closePopoverFn,
 }: {
   nodeName: string;
-  close: () => void;
+  closePopoverFn: () => void;
 }) {
   const viewer = React.useContext(ViewerContext)!;
   const node = viewer.useSceneTree((state) => state.nodeFromName[nodeName]);
@@ -107,6 +111,7 @@ function EditNodeProps({
       className={propsWrapper}
       component="form"
       onSubmit={form.onSubmit(handleSubmit)}
+      w="15em"
     >
       <Box>
         <Box
@@ -115,10 +120,13 @@ function EditNodeProps({
             alignItems: "center",
           }}
         >
-          <Box fw="500" style={{ flexGrow: "1" }} fz="sm">
+          <Box style={{ fontWeight: "500", flexGrow: "1" }} fz="sm">
             {node.message.type
               .replace("Message", "")
-              .replace(/([A-Z])/g, " $1")
+              // First, handle patterns like "Gui3D" -> "Gui 3D" (lowercase + digit + uppercase)
+              .replace(/([a-z])(\d[A-Z])/g, "$1 $2")
+              // Then handle remaining camelCase patterns like "DContainer" -> "D Container"
+              .replace(/([a-z])([A-Z])/g, "$1 $2")
               .trim()}{" "}
             Props
           </Box>
@@ -133,12 +141,12 @@ function EditNodeProps({
               }}
               onClick={(evt) => {
                 evt.stopPropagation();
-                close();
+                closePopoverFn();
               }}
             />
           </Tooltip>
         </Box>
-        <Box fz="xs" opacity="0.5">
+        <Box style={{ opacity: "0.5" }} fz="xs">
           {nodeName}
         </Box>
       </Box>
@@ -151,10 +159,10 @@ function EditNodeProps({
 
         return (
           <Flex key={key} align="center">
-            <Box size="sm" fz="xs" style={{ flexGrow: "1" }}>
+            <Box style={{ flexGrow: "1" }} fz="xs">
               {key.charAt(0).toUpperCase() + key.slice(1).split("_").join(" ")}
             </Box>
-            <Flex gap="xs" w="9em">
+            <Flex gap="xs" style={{ width: "9em" }}>
               {(() => {
                 // Check if this is a color property
                 try {
@@ -187,10 +195,13 @@ function EditNodeProps({
                       <ColorInput
                         size="xs"
                         styles={{
-                          input: { height: "1.625rem", minHeight: "1.625rem" },
+                          input: {
+                            height: "1.625rem",
+                            minHeight: "1.625rem",
+                          },
                           // icon: { transform: "scale(0.8)" },
                         }}
-                        w="100%"
+                        style={{ width: "100%" }}
                         value={rgbToHex(
                           parsedValue[0],
                           parsedValue[1],
@@ -226,7 +237,7 @@ function EditNodeProps({
                       },
                       // icon: { transform: "scale(0.8)" },
                     }}
-                    w="100%"
+                    style={{ width: "100%" }}
                     {...form.getInputProps(key)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
@@ -256,7 +267,7 @@ function EditNodeProps({
           </Flex>
         );
       })}
-      <Box fz="xs" opacity="0.4">
+      <Box style={{ opacity: "0.4" }} fz="xs">
         Updates from the server will overwrite local changes.
       </Box>
     </Box>
@@ -271,16 +282,18 @@ export default function SceneTreeTable() {
   );
   return (
     <ScrollArea className={tableWrapper}>
-      <VisibilityPaintProvider>
-        {childrenName.map((name) => (
-          <SceneTreeTableRow
-            nodeName={name}
-            key={name}
-            isParentVisible={true}
-            indentCount={0}
-          />
-        ))}
-      </VisibilityPaintProvider>
+      <PropsPopoverProvider>
+        <VisibilityPaintProvider>
+          {childrenName.map((name) => (
+            <SceneTreeTableRow
+              nodeName={name}
+              key={name}
+              isParentVisible={true}
+              indentCount={0}
+            />
+          ))}
+        </VisibilityPaintProvider>
+      </PropsPopoverProvider>
     </ScrollArea>
   );
 }
@@ -292,6 +305,11 @@ const VisibilityPaintContext = React.createContext<{
   stopPainting: () => void;
 } | null>(null);
 
+const PropsPopoverContext = React.createContext<{
+  openPopoverNodeName: string | null;
+  setOpenPopoverNodeName: (nodeName: string | null) => void;
+} | null>(null);
+
 export function VisibilityPaintProvider({
   children,
 }: {
@@ -300,14 +318,14 @@ export function VisibilityPaintProvider({
   const paintingRef = React.useRef(false);
   const paintValueRef = React.useRef(false);
 
-  const startPainting = React.useCallback((value: boolean) => {
+  const startPainting = (value: boolean) => {
     paintingRef.current = true;
     paintValueRef.current = value;
-  }, []);
+  };
 
-  const stopPainting = React.useCallback(() => {
+  const stopPainting = () => {
     paintingRef.current = false;
-  }, []);
+  };
 
   React.useEffect(() => {
     window.addEventListener("mouseup", stopPainting);
@@ -325,6 +343,24 @@ export function VisibilityPaintProvider({
   );
 }
 
+export function PropsPopoverProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const [openPopoverNodeName, setOpenPopoverNodeName] = React.useState<
+    string | null
+  >(null);
+
+  return (
+    <PropsPopoverContext.Provider
+      value={{ openPopoverNodeName, setOpenPopoverNodeName }}
+    >
+      {children}
+    </PropsPopoverContext.Provider>
+  );
+}
+
 // Modified SceneTreeTableRow
 const SceneTreeTableRow = React.memo(function SceneTreeTableRow(props: {
   nodeName: string;
@@ -332,28 +368,32 @@ const SceneTreeTableRow = React.memo(function SceneTreeTableRow(props: {
   indentCount: number;
 }) {
   const viewer = React.useContext(ViewerContext)!;
+  const theme = useMantineTheme();
+  const { colorScheme } = useMantineColorScheme();
   const { paintingRef, paintValueRef, startPainting } = React.useContext(
     VisibilityPaintContext,
   )!;
+  const { openPopoverNodeName, setOpenPopoverNodeName } =
+    React.useContext(PropsPopoverContext)!;
 
   const handleVisibilityMouseDown = (evt: React.MouseEvent) => {
     evt.stopPropagation();
     const newValue = !isVisible;
     startPainting(newValue);
 
-    // Update visibility
-    const attr = viewer.nodeAttributesFromName.current;
-    attr[props.nodeName]!.overrideVisibility = newValue;
-    setIsVisible(newValue);
+    // Update visibility using scene tree state.
+    viewer.useSceneTree.getState().updateNodeAttributes(props.nodeName, {
+      overrideVisibility: newValue,
+    });
   };
 
   const handleVisibilityMouseEnter = () => {
     if (!paintingRef.current) return;
 
-    // Update visibility to match paint value
-    const attr = viewer.nodeAttributesFromName.current;
-    attr[props.nodeName]!.overrideVisibility = paintValueRef.current;
-    setIsVisible(paintValueRef.current);
+    // Update visibility to match paint value using scene tree state.
+    viewer.useSceneTree.getState().updateNodeAttributes(props.nodeName, {
+      overrideVisibility: paintValueRef.current,
+    });
   };
 
   const childrenName = viewer.useSceneTree(
@@ -367,16 +407,18 @@ const SceneTreeTableRow = React.memo(function SceneTreeTableRow(props: {
     (state) => state.setLabelVisibility,
   );
 
-  const pollIsVisible = React.useCallback(() => {
-    const attrs = viewer.nodeAttributesFromName.current[props.nodeName];
-    return (
-      (attrs?.overrideVisibility === undefined
-        ? attrs?.visibility
-        : attrs.overrideVisibility) ?? true
-    );
-  }, [props.nodeName]);
+  // Get server visibility and override visibility separately
+  const serverVisibility =
+    viewer.useSceneTree(
+      (state) => state.nodeAttributesFromName[props.nodeName]?.visibility,
+    ) ?? true;
+  const overrideVisibility = viewer.useSceneTree(
+    (state) => state.nodeAttributesFromName[props.nodeName]?.overrideVisibility,
+  );
 
-  const [isVisible, setIsVisible] = React.useState(pollIsVisible());
+  // Compute final visibility: override takes precedence, fallback to server
+  const isVisible =
+    overrideVisibility !== undefined ? overrideVisibility : serverVisibility;
 
   // Ensure label visibility is cleaned up when component unmounts
   React.useEffect(() => {
@@ -384,27 +426,23 @@ const SceneTreeTableRow = React.memo(function SceneTreeTableRow(props: {
       setLabelVisibility(props.nodeName, false);
     };
   });
-  React.useEffect(() => {
-    // We put the visibility in a ref, so it needs to be polled. This was for
-    // performance reasons, but we should probably move it into the zustand
-    // store and just be careful to avoid subscribing to it from the r3f
-    // components.
-    const interval = setInterval(() => {
-      const visible = pollIsVisible();
-      if (visible !== isVisible) {
-        setIsVisible(visible);
-      }
-    }, 200);
-    return () => {
-      clearInterval(interval);
-    };
-  }, [isVisible]);
 
   const isVisibleEffective = isVisible && props.isParentVisible;
   const VisibleIcon = isVisible ? IconEye : IconEyeOff;
 
-  const [propsPanelOpened, { open: openPropsPanel, close: closePropsPanel }] =
-    useDisclosure(false);
+  const closePropsPopover = () => {
+    setOpenPopoverNodeName(null);
+  };
+
+  const togglePropsPopover = () => {
+    if (openPopoverNodeName === props.nodeName) {
+      // Close if this node's popup is currently open
+      setOpenPopoverNodeName(null);
+    } else {
+      // Open this node's popup (will close any other open popup)
+      setOpenPopoverNodeName(props.nodeName);
+    }
+  };
 
   return (
     <>
@@ -444,23 +482,33 @@ const SceneTreeTableRow = React.memo(function SceneTreeTableRow(props: {
           )}
         </Box>
         <Box style={{ width: "1.5em", height: "1.5em" }}>
-          <VisibleIcon
-            style={{
-              cursor: "pointer",
-              opacity: isVisibleEffective ? 0.85 : 0.25,
-              width: "1.5em",
-              height: "1.5em",
-              display: "block",
-            }}
-            onMouseDown={handleVisibilityMouseDown}
-            onMouseEnter={handleVisibilityMouseEnter}
-          />
+          <Tooltip label="Toggle visibility override">
+            <VisibleIcon
+              style={{
+                cursor: "pointer",
+                opacity: isVisibleEffective ? 0.85 : 0.25,
+                width: "1.5em",
+                height: "1.5em",
+                display: "block",
+                // Add theme color tint when visibility is overridden
+                ...(overrideVisibility !== undefined && {
+                  color:
+                    theme.colors[theme.primaryColor][
+                      colorScheme === "dark" ? 4 : 6
+                    ],
+                  filter: `drop-shadow(0 0 2px ${theme.colors[theme.primaryColor][colorScheme === "dark" ? 4 : 6]}30)`,
+                }),
+              }}
+              onMouseDown={handleVisibilityMouseDown}
+              onMouseEnter={handleVisibilityMouseEnter}
+            />
+          </Tooltip>
         </Box>
         <Box style={{ flexGrow: "1", userSelect: "none" }}>
           <span style={{ opacity: "0.3" }}>/</span>
           {props.nodeName.split("/").at(-1)}
         </Box>
-        {!propsPanelOpened ? (
+        {overrideVisibility !== undefined ? (
           <Box
             className={editIconWrapper}
             style={{
@@ -468,28 +516,84 @@ const SceneTreeTableRow = React.memo(function SceneTreeTableRow(props: {
               height: "1.25em",
               display: "block",
               transition: "opacity 0.2s",
+              marginRight: "0.25em",
             }}
           >
-            <Tooltip label={"Local props"}>
-              <IconPencil
+            <Tooltip label="Clear visibility override">
+              <IconEyeX
                 style={{
                   cursor: "pointer",
                   width: "1.25em",
                   height: "1.25em",
                   display: "block",
+                  opacity: 0.7,
+                  color:
+                    theme.colors[theme.primaryColor][
+                      colorScheme === "dark" ? 4 : 6
+                    ],
+                  filter: `drop-shadow(0 0 2px ${theme.colors[theme.primaryColor][colorScheme === "dark" ? 4 : 6]}30)`,
                 }}
                 onClick={(evt) => {
                   evt.stopPropagation();
-                  openPropsPanel();
+                  viewer.useSceneTree
+                    .getState()
+                    .updateNodeAttributes(props.nodeName, {
+                      overrideVisibility: undefined,
+                    });
                 }}
               />
             </Tooltip>
           </Box>
         ) : null}
+        <Popover
+          position="bottom"
+          withArrow
+          shadow="sm"
+          arrowSize={10}
+          trapFocus
+          opened={openPopoverNodeName === props.nodeName}
+          onDismiss={closePropsPopover}
+        >
+          <Popover.Target>
+            <Box
+              className={editIconWrapper}
+              style={{
+                width: "1.25em",
+                height: "1.25em",
+                display: "block",
+                transition: "opacity 0.2s",
+              }}
+            >
+              <Tooltip label={"Local props"}>
+                <IconPencil
+                  style={{
+                    cursor: "pointer",
+                    width: "1.25em",
+                    height: "1.25em",
+                    display: "block",
+                  }}
+                  onClick={(evt) => {
+                    evt.stopPropagation();
+                    togglePropsPopover();
+                  }}
+                />
+              </Tooltip>
+            </Box>
+          </Popover.Target>
+          <Popover.Dropdown
+            // Don't propagate clicks or mouse events. This prevents (i)
+            // clicking the popover from expanding rows, and (ii) clicking
+            // color inputs from closing the popover.
+            onMouseDown={(evt) => evt.stopPropagation()}
+            onClick={(evt) => evt.stopPropagation()}
+          >
+            <EditNodeProps
+              nodeName={props.nodeName}
+              closePopoverFn={closePropsPopover}
+            />
+          </Popover.Dropdown>
+        </Popover>
       </Box>
-      {propsPanelOpened ? (
-        <EditNodeProps nodeName={props.nodeName} close={closePropsPanel} />
-      ) : null}
       {expanded
         ? childrenName.map((name) => (
             <SceneTreeTableRow

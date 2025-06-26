@@ -19,10 +19,11 @@ export function makeThrottledMessageSender(
   let latestMessage: Message | null = null;
 
   function send(message: Message) {
-    if (viewer.sendMessageRef.current === null) return;
+    const viewerMutable = viewer.mutable.current;
+    if (viewerMutable.sendMessage === null) return;
     latestMessage = message;
     if (readyToSend) {
-      viewer.sendMessageRef.current(message);
+      viewerMutable.sendMessage(message);
       stale = false;
       readyToSend = false;
 
@@ -35,7 +36,16 @@ export function makeThrottledMessageSender(
       stale = true;
     }
   }
-  return send;
+  function flush() {
+    const viewerMutable = viewer.mutable.current;
+    if (viewerMutable.sendMessage === null) return;
+    if (latestMessage !== null) {
+      viewer.mutable.current.sendMessage(latestMessage);
+      latestMessage = null;
+      stale = false;
+    }
+  }
+  return { send, flush };
 }
 
 /** Type guard for threejs textures. Meant to be used with `scene.background`. */

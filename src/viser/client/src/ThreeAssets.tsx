@@ -44,7 +44,6 @@ const PointCloudMaterial = /* @__PURE__ */ shaderMaterial(
   `varying vec3 vPosition;
   varying vec3 vColor;
   uniform float point_ball_norm;
-  uniform vec3 uniformColor;
 
   void main() {
       if (point_ball_norm < 1000.0) {
@@ -59,123 +58,124 @@ const PointCloudMaterial = /* @__PURE__ */ shaderMaterial(
    `,
 );
 
-export const PointCloud = React.forwardRef<THREE.Points, PointCloudMessage>(
-  function PointCloud(message, ref) {
-    const getThreeState = useThree((state) => state.get);
+export const PointCloud = React.forwardRef<
+  THREE.Points,
+  PointCloudMessage & { children?: React.ReactNode }
+>(function PointCloud({ children, ...message }, ref) {
+  const getThreeState = useThree((state) => state.get);
 
-    const props = message.props;
+  const props = message.props;
 
-    // Create geometry using useMemo for better performance.
-    const geometry = React.useMemo(() => {
-      const geometry = new THREE.BufferGeometry();
+  // Create geometry using useMemo for better performance.
+  const geometry = React.useMemo(() => {
+    const geometry = new THREE.BufferGeometry();
 
-      if (message.props.precision === "float16") {
-        geometry.setAttribute(
-          "position",
-          new THREE.Float16BufferAttribute(
-            new Uint16Array(
-              props.points.buffer.slice(
-                props.points.byteOffset,
-                props.points.byteOffset + props.points.byteLength,
-              ),
+    if (message.props.precision === "float16") {
+      geometry.setAttribute(
+        "position",
+        new THREE.Float16BufferAttribute(
+          new Uint16Array(
+            props.points.buffer.slice(
+              props.points.byteOffset,
+              props.points.byteOffset + props.points.byteLength,
             ),
-            3,
           ),
-        );
-      } else {
-        geometry.setAttribute(
-          "position",
-          new THREE.Float32BufferAttribute(
-            new Float32Array(
-              props.points.buffer.slice(
-                props.points.byteOffset,
-                props.points.byteOffset + props.points.byteLength,
-              ),
+          3,
+        ),
+      );
+    } else {
+      geometry.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(
+          new Float32Array(
+            props.points.buffer.slice(
+              props.points.byteOffset,
+              props.points.byteOffset + props.points.byteLength,
             ),
-            3,
           ),
-        );
-      }
+          3,
+        ),
+      );
+    }
 
-      // Add color attribute if needed.
-      if (props.colors.length > 3) {
-        geometry.setAttribute(
-          "color",
-          new THREE.BufferAttribute(new Uint8Array(props.colors), 3, true),
-        );
-      } else if (props.colors.length < 3) {
-        console.error(
-          `Invalid color buffer length, got ${props.colors.length}`,
-        );
-      }
+    // Add color attribute if needed.
+    if (props.colors.length > 3) {
+      geometry.setAttribute(
+        "color",
+        new THREE.BufferAttribute(new Uint8Array(props.colors), 3, true),
+      );
+    } else if (props.colors.length < 3) {
+      console.error(`Invalid color buffer length, got ${props.colors.length}`);
+    }
 
-      return geometry;
-    }, [props.points, props.colors]);
+    return geometry;
+  }, [props.points, props.colors]);
 
-    // Create material using useMemo for better performance.
-    const material = React.useMemo(() => {
-      const material = new PointCloudMaterial();
+  // Create material using useMemo for better performance.
+  const material = React.useMemo(() => {
+    const material = new PointCloudMaterial();
 
-      if (props.colors.length > 3) {
-        material.vertexColors = true;
-      } else {
-        material.vertexColors = false;
-        material.uniforms.uniformColor.value = new THREE.Color(
-          props.colors[0] / 255.0,
-          props.colors[1] / 255.0,
-          props.colors[2] / 255.0,
-        );
-      }
+    if (props.colors.length > 3) {
+      material.vertexColors = true;
+    } else {
+      material.vertexColors = false;
+      material.uniforms.uniformColor.value = new THREE.Color(
+        props.colors[0] / 255.0,
+        props.colors[1] / 255.0,
+        props.colors[2] / 255.0,
+      );
+    }
 
-      return material;
-    }, [props.colors]);
+    return material;
+  }, [props.colors]);
 
-    // Clean up resources when component unmounts.
-    React.useEffect(() => {
-      return () => {
-        geometry.dispose();
-        material.dispose();
-      };
-    }, [geometry, material]);
+  // Clean up resources when component unmounts.
+  React.useEffect(() => {
+    return () => {
+      geometry.dispose();
+      material.dispose();
+    };
+  }, [geometry, material]);
 
-    // Update material properties with point_ball_norm
-    React.useEffect(() => {
-      material.uniforms.scale.value = 10.0;
-      material.uniforms.point_ball_norm.value = {
-        square: Infinity,
-        diamond: 1.0,
-        circle: 2.0,
-        rounded: 3.0,
-        sparkle: 0.6,
-      }[props.point_shape];
-    }, [props.point_shape, material]);
+  // Update material properties with point_ball_norm
+  React.useEffect(() => {
+    material.uniforms.scale.value = 10.0;
+    material.uniforms.point_ball_norm.value = {
+      square: Infinity,
+      diamond: 1.0,
+      circle: 2.0,
+      rounded: 3.0,
+      sparkle: 0.6,
+    }[props.point_shape];
+  }, [props.point_shape, material]);
 
-    const rendererSize = new THREE.Vector2();
-    useFrame(() => {
-      // Match point scale to behavior of THREE.PointsMaterial().
-      // point px height / actual height = point meters height / frustum meters height
-      // frustum meters height = math.tan(fov / 2.0) * z
-      // point px height = (point meters height / math.tan(fov / 2.0) * actual height)  / z
-      material.uniforms.scale.value =
-        (props.point_size /
-          Math.tan(
-            (((getThreeState().camera as THREE.PerspectiveCamera).fov / 180.0) *
-              Math.PI) /
-              2.0,
-          )) *
-        getThreeState().gl.getSize(rendererSize).height *
-        getThreeState().gl.getPixelRatio();
-    });
-    return (
-      <points
-        frustumCulled={false}
-        ref={ref}
-        geometry={geometry}
-        material={material}
-      />
-    );
-  },
-);
+  const rendererSize = new THREE.Vector2();
+  useFrame(() => {
+    // Match point scale to behavior of THREE.PointsMaterial().
+    // point px height / actual height = point meters height / frustum meters height
+    // frustum meters height = math.tan(fov / 2.0) * z
+    // point px height = (point meters height / math.tan(fov / 2.0) * actual height)  / z
+    material.uniforms.scale.value =
+      (props.point_size /
+        Math.tan(
+          (((getThreeState().camera as THREE.PerspectiveCamera).fov / 180.0) *
+            Math.PI) /
+            2.0,
+        )) *
+      getThreeState().gl.getSize(rendererSize).height *
+      getThreeState().gl.getPixelRatio();
+  });
+  return (
+    <points
+      frustumCulled={false}
+      ref={ref}
+      geometry={geometry}
+      material={material}
+    >
+      {children}
+    </points>
+  );
+});
 
 /** Helper for adding coordinate frames as scene nodes. */
 export const CoordinateFrame = React.forwardRef<
@@ -186,6 +186,7 @@ export const CoordinateFrame = React.forwardRef<
     axesRadius?: number;
     originRadius?: number;
     originColor?: number;
+    children?: React.ReactNode;
   }
 >(function CoordinateFrame(
   {
@@ -194,6 +195,7 @@ export const CoordinateFrame = React.forwardRef<
     axesRadius = 0.0125,
     originRadius = undefined,
     originColor = 0xecec00,
+    children,
   },
   ref,
 ) {
@@ -232,6 +234,7 @@ export const CoordinateFrame = React.forwardRef<
           </Instances>
         </>
       )}
+      {children}
     </group>
   );
 });
@@ -244,11 +247,21 @@ export const InstancedAxes = React.forwardRef<
     batched_wxyzs: Uint8Array;
     /** Raw bytes containing float32 position values (xyz) */
     batched_positions: Uint8Array;
+    /** Raw bytes containing float32 scale values (uniform or per-axis XYZ) */
+    batched_scales: Uint8Array | null;
     axes_length?: number;
     axes_radius?: number;
+    children?: React.ReactNode;
   }
 >(function InstancedAxes(
-  { batched_wxyzs, batched_positions, axes_length = 0.5, axes_radius = 0.0125 },
+  {
+    batched_wxyzs,
+    batched_positions,
+    batched_scales,
+    axes_length = 0.5,
+    axes_radius = 0.0125,
+    children,
+  },
   ref,
 ) {
   const axesRef = React.useRef<THREE.InstancedMesh>(null);
@@ -297,6 +310,7 @@ export const InstancedAxes = React.forwardRef<
     const T_world_framey = new THREE.Matrix4();
     const T_world_framez = new THREE.Matrix4();
     const tmpQuat = new THREE.Quaternion();
+    const tmpScale = new THREE.Vector3();
 
     const { T_frame_framex, T_frame_framey, T_frame_framez, red, green, blue } =
       axesTransformations;
@@ -314,6 +328,14 @@ export const InstancedAxes = React.forwardRef<
       batched_wxyzs.byteLength,
     );
 
+    const scalesView = batched_scales
+      ? new DataView(
+          batched_scales.buffer,
+          batched_scales.byteOffset,
+          batched_scales.byteLength,
+        )
+      : null;
+
     // Calculate number of instances.
     const numInstances = batched_wxyzs.byteLength / (4 * 4); // 4 floats, 4 bytes per float
 
@@ -321,6 +343,30 @@ export const InstancedAxes = React.forwardRef<
       // Calculate byte offsets for reading float values.
       const posOffset = i * 3 * 4; // 3 floats, 4 bytes per float
       const wxyzOffset = i * 4 * 4; // 4 floats, 4 bytes per float
+      const scaleOffset =
+        batched_scales &&
+        batched_scales.byteLength === (batched_wxyzs.byteLength / 4) * 3
+          ? i * 3 * 4 // Per-axis scaling: 3 floats, 4 bytes per float
+          : i * 4; // Uniform scaling: 1 float, 4 bytes per float
+
+      // Read scale value if available.
+      if (scalesView) {
+        // Check if we have per-axis scaling (N,3) or uniform scaling (N,).
+        if (batched_scales!.byteLength === (batched_wxyzs.byteLength / 4) * 3) {
+          // Per-axis scaling: read 3 floats.
+          tmpScale.set(
+            scalesView.getFloat32(scaleOffset, true), // x scale
+            scalesView.getFloat32(scaleOffset + 4, true), // y scale
+            scalesView.getFloat32(scaleOffset + 8, true), // z scale
+          );
+        } else {
+          // Uniform scaling: read 1 float and apply to all axes.
+          const scale = scalesView.getFloat32(scaleOffset, true);
+          tmpScale.set(scale, scale, scale);
+        }
+      } else {
+        tmpScale.set(1, 1, 1);
+      }
 
       // Set position from DataView.
       T_world_frame.makeRotationFromQuaternion(
@@ -330,11 +376,13 @@ export const InstancedAxes = React.forwardRef<
           wxyzsView.getFloat32(wxyzOffset + 12, true), // z
           wxyzsView.getFloat32(wxyzOffset, true), // w (first value)
         ),
-      ).setPosition(
-        positionsView.getFloat32(posOffset, true), // x
-        positionsView.getFloat32(posOffset + 4, true), // y
-        positionsView.getFloat32(posOffset + 8, true), // z
-      );
+      )
+        .scale(tmpScale)
+        .setPosition(
+          positionsView.getFloat32(posOffset, true), // x
+          positionsView.getFloat32(posOffset + 4, true), // y
+          positionsView.getFloat32(posOffset + 8, true), // z
+        );
 
       T_world_framex.copy(T_world_frame).multiply(T_frame_framex);
       T_world_framey.copy(T_world_frame).multiply(T_frame_framey);
@@ -350,7 +398,7 @@ export const InstancedAxes = React.forwardRef<
     }
     axesRef.current.instanceMatrix.needsUpdate = true;
     axesRef.current.instanceColor!.needsUpdate = true;
-  }, [batched_wxyzs, batched_positions, axesTransformations]);
+  }, [batched_wxyzs, batched_positions, batched_scales, axesTransformations]);
 
   // Create cylinder geometries for outlines - one for each axis.
   const outlineCylinderGeom = React.useMemo(
@@ -405,6 +453,7 @@ export const InstancedAxes = React.forwardRef<
         geometry={outlineCylinderGeom}
         batched_positions={batched_positions}
         batched_wxyzs={batched_wxyzs}
+        batched_scales={batched_scales}
         meshTransform={xAxisTransform}
         computeBatchIndexFromInstanceIndex={(instanceId) =>
           Math.floor(instanceId / 3)
@@ -415,6 +464,7 @@ export const InstancedAxes = React.forwardRef<
         geometry={outlineCylinderGeom}
         batched_positions={batched_positions}
         batched_wxyzs={batched_wxyzs}
+        batched_scales={batched_scales}
         meshTransform={yAxisTransform}
         computeBatchIndexFromInstanceIndex={(instanceId) =>
           Math.floor(instanceId / 3)
@@ -425,60 +475,64 @@ export const InstancedAxes = React.forwardRef<
         geometry={outlineCylinderGeom}
         batched_positions={batched_positions}
         batched_wxyzs={batched_wxyzs}
+        batched_scales={batched_scales}
         meshTransform={zAxisTransform}
         computeBatchIndexFromInstanceIndex={(instanceId) =>
           Math.floor(instanceId / 3)
         }
       />
+      {children}
     </group>
   );
 });
 
-export const ViserImage = React.forwardRef<THREE.Group, ImageMessage>(
-  function ViserImage(message, ref) {
-    // We can't use useMemo here because TextureLoader.load is asynchronous.
-    // And we need to use setState to update the texture after loading.
-    const [imageTexture, setImageTexture] = React.useState<THREE.Texture>();
+export const ViserImage = React.forwardRef<
+  THREE.Group,
+  ImageMessage & { children?: React.ReactNode }
+>(function ViserImage({ children, ...message }, ref) {
+  // We can't use useMemo here because TextureLoader.load is asynchronous.
+  // And we need to use setState to update the texture after loading.
+  const [imageTexture, setImageTexture] = React.useState<THREE.Texture>();
 
-    React.useEffect(() => {
-      if (message.props.media_type !== null && message.props._data !== null) {
-        const image_url = URL.createObjectURL(new Blob([message.props._data]));
-        new THREE.TextureLoader().load(image_url, (texture) => {
-          setImageTexture(texture);
-          URL.revokeObjectURL(image_url);
-        });
-      }
-    }, [message.props.media_type, message.props._data]);
-    return (
-      <group ref={ref}>
-        <mesh
-          rotation={new THREE.Euler(Math.PI, 0.0, 0.0)}
-          castShadow={message.props.cast_shadow}
-          receiveShadow={message.props.receive_shadow}
-        >
-          <OutlinesIfHovered />
-          <planeGeometry
-            attach="geometry"
-            args={[message.props.render_width, message.props.render_height]}
-          />
-          <meshBasicMaterial
-            attach="material"
-            transparent={true}
-            side={THREE.DoubleSide}
-            map={imageTexture}
-            toneMapped={false}
-          />
-        </mesh>
-      </group>
-    );
-  },
-);
+  React.useEffect(() => {
+    if (message.props.media_type !== null && message.props._data !== null) {
+      const image_url = URL.createObjectURL(new Blob([message.props._data]));
+      new THREE.TextureLoader().load(image_url, (texture) => {
+        setImageTexture(texture);
+        URL.revokeObjectURL(image_url);
+      });
+    }
+  }, [message.props.media_type, message.props._data]);
+  return (
+    <group ref={ref}>
+      <mesh
+        rotation={new THREE.Euler(Math.PI, 0.0, 0.0)}
+        castShadow={message.props.cast_shadow}
+        receiveShadow={message.props.receive_shadow}
+      >
+        <OutlinesIfHovered />
+        <planeGeometry
+          attach="geometry"
+          args={[message.props.render_width, message.props.render_height]}
+        />
+        <meshBasicMaterial
+          attach="material"
+          transparent={true}
+          side={THREE.DoubleSide}
+          map={imageTexture}
+          toneMapped={false}
+        />
+      </mesh>
+      {children}
+    </group>
+  );
+});
 
 /** Helper for visualizing camera frustums. */
 export const CameraFrustum = React.forwardRef<
   THREE.Group,
-  CameraFrustumMessage
->(function CameraFrustum(message, ref) {
+  CameraFrustumMessage & { children?: React.ReactNode }
+>(function CameraFrustum({ children, ...message }, ref) {
   // We can't use useMemo here because TextureLoader.load is asynchronous.
   // And we need to use setState to update the texture after loading.
   const [imageTexture, setImageTexture] = React.useState<THREE.Texture>();
@@ -578,6 +632,7 @@ export const CameraFrustum = React.forwardRef<
           />
         </mesh>
       )}
+      {children}
     </group>
   );
 });

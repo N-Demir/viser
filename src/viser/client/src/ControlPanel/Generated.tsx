@@ -1,5 +1,5 @@
 import { ViewerContext } from "../ViewerContext";
-import { useThrottledMessageSender } from "../WebsocketFunctions";
+import { useThrottledMessageSender } from "../WebsocketUtils";
 import { GuiComponentContext } from "./GuiComponentContext";
 
 import { Box } from "@mantine/core";
@@ -17,6 +17,7 @@ import RgbaComponent from "../components/Rgba";
 import ButtonGroupComponent from "../components/ButtonGroup";
 import MarkdownComponent from "../components/Markdown";
 import PlotlyComponent from "../components/PlotlyComponent";
+import UplotComponent from "../components/UplotComponent";
 import TabGroupComponent from "../components/TabGroup";
 import FolderComponent from "../components/Folder";
 import MultiSliderComponent from "../components/MultiSlider";
@@ -33,7 +34,7 @@ export default function GeneratedGuiContainer({
 }) {
   const viewer = React.useContext(ViewerContext)!;
   const updateGuiProps = viewer.useGui((state) => state.updateGuiProps);
-  const messageSender = useThrottledMessageSender(50);
+  const messageSender = useThrottledMessageSender(50).send;
 
   function setValue(uuid: string, value: NonNullable<unknown>) {
     updateGuiProps(uuid, { value: value });
@@ -79,8 +80,12 @@ function GuiContainer({ containerUuid }: { containerUuid: string }) {
   );
   const out = (
     <Box pt="xs">
-      {guiUuidOrderPairArray.map((pair) => (
-        <GeneratedInput key={pair.uuid} guiUuid={pair.uuid} />
+      {guiUuidOrderPairArray.map((pair, index) => (
+        <GeneratedInput
+          key={pair.uuid}
+          guiUuid={pair.uuid}
+          nextGuiUuid={guiUuidOrderPairArray[index + 1]?.uuid ?? null}
+        />
       ))}
     </Box>
   );
@@ -88,7 +93,10 @@ function GuiContainer({ containerUuid }: { containerUuid: string }) {
 }
 
 /** A single generated GUI element. */
-function GeneratedInput(props: { guiUuid: string }) {
+function GeneratedInput(props: {
+  guiUuid: string;
+  nextGuiUuid: string | null;
+}) {
   const viewer = React.useContext(ViewerContext)!;
   const conf = viewer.useGui((state) => state.guiConfigFromUuid[props.guiUuid]);
   if (conf === undefined) {
@@ -97,7 +105,7 @@ function GeneratedInput(props: { guiUuid: string }) {
   }
   switch (conf.type) {
     case "GuiFolderMessage":
-      return <FolderComponent {...conf} />;
+      return <FolderComponent {...conf} nextGuiUuid={props.nextGuiUuid} />;
     case "GuiTabGroupMessage":
       return <TabGroupComponent {...conf} />;
     case "GuiMarkdownMessage":
@@ -106,6 +114,8 @@ function GeneratedInput(props: { guiUuid: string }) {
       return <HtmlComponent {...conf} />;
     case "GuiPlotlyMessage":
       return <PlotlyComponent {...conf} />;
+    case "GuiUplotMessage":
+      return <UplotComponent {...conf} />;
     case "GuiImageMessage":
       return <ImageComponent {...conf} />;
     case "GuiButtonMessage":

@@ -6,6 +6,31 @@ location and look at are also settable, so is some intrinsics I think.
 
 We "mimic" a fps mode by having the orbit control commands zoomed in a lot
 
+How to run:
+```
+# Install package.
+cd ~/viser
+pip install -e .
+
+# Install example dependencies.
+pip install -e .[examples]
+```
+
+After installing node and yarn
+```
+cd ~/viser/src/viser/client
+yarn install
+```
+
+
+# Launching Client
+```
+cd ~/viser/src/viser/client
+yarn start
+```
+
+
+
 ----
 <h1 align="left">
     <img alt="viser logo" src="https://viser.studio/main/_static/logo.svg" width="auto" height="30" />

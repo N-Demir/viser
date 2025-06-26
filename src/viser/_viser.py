@@ -23,7 +23,7 @@ from typing_extensions import Literal
 
 from . import _client_autobuild, _messages, infra
 from . import transforms as tf
-from ._gui_api import Color, GuiApi, _make_uuid
+from ._gui_api import GuiApi, LiteralColor, _make_uuid
 from ._notification_handle import NotificationHandle, _NotificationHandleState
 from ._scene_api import SceneApi, cast_vector
 from ._threadpool_exceptions import print_threadpool_errors
@@ -168,8 +168,7 @@ class CameraHandle:
 
     @position.setter
     def position(self, position: tuple[float, float, float] | np.ndarray) -> None:
-        position_array = np.asarray(position)
-
+        position_array = np.asarray(position).astype(np.float64)
         if np.allclose(position_array, self._state.position):
             return
         offset = position_array - np.array(self.position)  # type: ignore
@@ -276,7 +275,7 @@ class CameraHandle:
 
     @look_at.setter
     def look_at(self, look_at: tuple[float, float, float] | np.ndarray) -> None:
-        look_at_array = np.asarray(look_at)
+        look_at_array = np.asarray(look_at).astype(np.float64)
         if np.allclose(self._state.look_at, look_at_array):
             return
         self._state.look_at = look_at_array
@@ -440,7 +439,7 @@ class ClientHandle(_BackwardsCompatibilityShim if not TYPE_CHECKING else object)
                 _messages.FileTransferPart(
                     None,
                     transfer_uuid=uuid,
-                    part=i,
+                    part_index=i,
                     content=part,
                 )
             )
@@ -453,7 +452,7 @@ class ClientHandle(_BackwardsCompatibilityShim if not TYPE_CHECKING else object)
         loading: bool = False,
         with_close_button: bool = True,
         auto_close: int | Literal[False] = False,
-        color: Color | None = None,
+        color: LiteralColor | tuple[int, int, int] | None = None,
     ) -> NotificationHandle:
         """Add a notification to the client's interface.
 

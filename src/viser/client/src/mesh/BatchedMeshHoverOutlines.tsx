@@ -13,12 +13,14 @@ interface BatchedMeshHoverOutlinesProps {
   batched_positions: Uint8Array;
   /** Raw bytes containing float32 quaternion values (wxyz) */
   batched_wxyzs: Uint8Array;
+  /** Raw bytes containing float32 scale values (uniform or per-axis XYZ) */
+  batched_scales: Uint8Array | null;
   meshTransform?: {
     position: THREE.Vector3;
     rotation: THREE.Quaternion;
     scale: THREE.Vector3;
   };
-  // Function to compute batch index from instance index - needed for cases like InstancedAxes
+  // Function to compute batch index from instance index - needed for cases like InstancedAxes.
   // where instanceId (from hover) doesn't match batched_positions indexing
   computeBatchIndexFromInstanceIndex?: (instanceId: number) => number;
 }
@@ -44,36 +46,37 @@ export const BatchedMeshHoverOutlines: React.FC<
   geometry,
   batched_positions,
   batched_wxyzs,
+  batched_scales,
   meshTransform,
   computeBatchIndexFromInstanceIndex,
 }) => {
-  // Get hover state from context
+  // Get hover state from context.
   const hoveredRef = React.useContext(HoverableContext)!;
 
-  // Create outline mesh reference
+  // Create outline mesh reference.
   const outlineRef = React.useRef<THREE.Mesh>(null);
 
-  // Get rendering context for screen size
+  // Get rendering context for screen size.
   const gl = useThree((state) => state.gl);
   const contextSize = React.useMemo(
     () => gl.getDrawingBufferSize(new THREE.Vector2()),
     [gl],
   );
 
-  // Create outline geometry based on the original geometry using memoization
+  // Create outline geometry based on the original geometry using memoization.
   const outlineGeometry = React.useMemo(() => {
     if (!geometry) return null;
-    // Clone the geometry to create an independent copy for the outline
+    // Clone the geometry to create an independent copy for the outline.
     return geometry.clone();
   }, [geometry]);
 
-  // Create outline material with fixed properties
+  // Create outline material with fixed properties.
   const outlineMaterial = React.useMemo(() => {
     const material = new OutlinesMaterial({
       side: THREE.BackSide,
     });
 
-    // Set fixed properties to match OutlinesIfHovered
+    // Set fixed properties to match OutlinesIfHovered.
     material.thickness = 10;
     material.color = new THREE.Color(0xfbff00); // Yellow highlight color
     material.opacity = 0.8;
@@ -85,8 +88,8 @@ export const BatchedMeshHoverOutlines: React.FC<
     return material;
   }, [contextSize]);
 
-  // Separate cleanup for geometry and material to handle dependency changes correctly
-  // Clean up geometry when it changes or component unmounts
+  // Separate cleanup for geometry and material to handle dependency changes correctly.
+  // Clean up geometry when it changes or component unmounts.
   React.useEffect(() => {
     return () => {
       if (outlineGeometry) {
@@ -95,7 +98,7 @@ export const BatchedMeshHoverOutlines: React.FC<
     };
   }, [outlineGeometry]);
 
-  // Clean up material when it changes or component unmounts
+  // Clean up material when it changes or component unmounts.
   React.useEffect(() => {
     return () => {
       if (outlineMaterial) {
@@ -104,27 +107,27 @@ export const BatchedMeshHoverOutlines: React.FC<
     };
   }, [outlineMaterial]);
 
-  // Update outline position based on hover state
+  // Update outline position based on hover state.
   useFrame(() => {
     if (!outlineRef.current || !outlineGeometry || !hoveredRef) return;
 
-    // Hide by default
+    // Hide by default.
     outlineRef.current.visible = false;
 
-    // Check if we're hovering and have a valid instanceId
+    // Check if we're hovering and have a valid instanceId.
     if (
       hoveredRef.current.isHovered &&
       hoveredRef.current.instanceId !== null
     ) {
-      // Get the instance ID from the hover state
+      // Get the instance ID from the hover state.
       const hoveredInstanceId = hoveredRef.current.instanceId;
 
-      // Calculate the actual batch index using the mapping function if provided
+      // Calculate the actual batch index using the mapping function if provided.
       const batchIndex = computeBatchIndexFromInstanceIndex
         ? computeBatchIndexFromInstanceIndex(hoveredInstanceId)
         : hoveredInstanceId; // Default is identity mapping
 
-      // Create DataViews to read float values
+      // Create DataViews to read float values.
       const positionsView = new DataView(
         batched_positions.buffer,
         batched_positions.byteOffset,
@@ -137,20 +140,28 @@ export const BatchedMeshHoverOutlines: React.FC<
         batched_wxyzs.byteLength,
       );
 
+      const scalesView = batched_scales
+        ? new DataView(
+            batched_scales.buffer,
+            batched_scales.byteOffset,
+            batched_scales.byteLength,
+          )
+        : null;
+
       // Only show outline if the batch index is valid (check bytes per position = 3 floats * 4 bytes)
       if (batchIndex >= 0 && batchIndex * 12 < batched_positions.byteLength) {
         // Calculate byte offsets.
         const posOffset = batchIndex * 3 * 4; // 3 floats, 4 bytes per float
         const wxyzOffset = batchIndex * 4 * 4; // 4 floats, 4 bytes per float
 
-        // Position the outline at the hovered instance
+        // Position the outline at the hovered instance.
         outlineRef.current.position.set(
           positionsView.getFloat32(posOffset, true), // x
           positionsView.getFloat32(posOffset + 4, true), // y
           positionsView.getFloat32(posOffset + 8, true), // z
         );
 
-        // Set rotation to match the hovered instance
+        // Set rotation to match the hovered instance.
         outlineRef.current.quaternion.set(
           wxyzsView.getFloat32(wxyzOffset + 4, true), // x
           wxyzsView.getFloat32(wxyzOffset + 8, true), // y
@@ -158,13 +169,37 @@ export const BatchedMeshHoverOutlines: React.FC<
           wxyzsView.getFloat32(wxyzOffset, true), // w
         );
 
+        // Set scale to match the hovered instance
+        if (scalesView) {
+          // Check if we have per-axis scaling (N,3) or uniform scaling (N,).
+          if (
+            batched_scales!.byteLength ===
+            (batched_wxyzs.byteLength / 4) * 3
+          ) {
+            // Per-axis scaling: read 3 floats.
+            const scaleOffset = batchIndex * 3 * 4; // 3 floats, 4 bytes per float
+            outlineRef.current.scale.set(
+              scalesView.getFloat32(scaleOffset, true), // x scale
+              scalesView.getFloat32(scaleOffset + 4, true), // y scale
+              scalesView.getFloat32(scaleOffset + 8, true), // z scale
+            );
+          } else {
+            // Uniform scaling: read 1 float and apply to all axes.
+            const scaleOffset = batchIndex * 4; // 1 float, 4 bytes per float
+            const scale = scalesView.getFloat32(scaleOffset, true);
+            outlineRef.current.scale.setScalar(scale);
+          }
+        } else {
+          outlineRef.current.scale.set(1, 1, 1);
+        }
+
         // Apply mesh transform if provided (for GLB assets)
         if (meshTransform) {
           // Create instance matrix from batched data.
           _tempObjects.instanceMatrix.compose(
             outlineRef.current.position,
             outlineRef.current.quaternion,
-            _tempObjects.oneVector,
+            outlineRef.current.scale,
           );
 
           // Create mesh transform matrix.
@@ -198,7 +233,7 @@ export const BatchedMeshHoverOutlines: React.FC<
     }
   });
 
-  // This is now handled by the earlier cleanup effect
+  // This is now handled by the earlier cleanup effect.
 
   if (!hoveredRef || !outlineGeometry) {
     return null;

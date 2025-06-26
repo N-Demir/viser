@@ -14,12 +14,14 @@ from typing_extensions import Literal, ParamSpec, TypeAlias, assert_never
 
 from . import _messages
 from . import transforms as tf
+from ._assignable_props_api import colors_to_uint8
 from ._scene_handles import (
     AmbientLightHandle,
     BatchedAxesHandle,
     BatchedGlbHandle,
     BatchedMeshHandle,
     BoneState,
+    BoxHandle,
     CameraFrustumHandle,
     DirectionalLightHandle,
     FrameHandle,
@@ -28,6 +30,7 @@ from ._scene_handles import (
     GridHandle,
     Gui3dContainerHandle,
     HemisphereLightHandle,
+    IcosphereHandle,
     ImageHandle,
     LabelHandle,
     LineSegmentsHandle,
@@ -43,10 +46,10 @@ from ._scene_handles import (
     SplineCatmullRomHandle,
     SplineCubicBezierHandle,
     SpotLightHandle,
+    TransformControlsEvent,
     TransformControlsHandle,
     _ClickableSceneNodeHandle,
     _TransformControlsState,
-    colors_to_uint8,
 )
 from ._threadpool_exceptions import print_threadpool_errors
 
@@ -164,6 +167,14 @@ class SceneApi:
         self._websock_interface.register_handler(
             _messages.TransformControlsUpdateMessage,
             self._handle_transform_controls_updates,
+        )
+        self._websock_interface.register_handler(
+            _messages.TransformControlsDragStartMessage,
+            self._handle_transform_controls_drag_start,
+        )
+        self._websock_interface.register_handler(
+            _messages.TransformControlsDragEndMessage,
+            self._handle_transform_controls_drag_end,
         )
         self._websock_interface.register_handler(
             _messages.SceneNodeClickMessage,
@@ -926,6 +937,7 @@ class SceneApi:
         name: str,
         batched_wxyzs: tuple[tuple[float, float, float, float], ...] | np.ndarray,
         batched_positions: tuple[tuple[float, float, float], ...] | np.ndarray,
+        batched_scales: tuple[float, ...] | np.ndarray | None = None,
         axes_length: float = 0.5,
         axes_radius: float = 0.025,
         wxyz: tuple[float, float, float, float] | np.ndarray = (1.0, 0.0, 0.0, 0.0),
@@ -949,6 +961,7 @@ class SceneApi:
                 define a kinematic tree.
             batched_wxyzs: Float array of shape (N,4).
             batched_positions: Float array of shape (N,3).
+            batched_scales: Float array of shape (N,) for uniform scales or (N,3) for per-axis (XYZ) scales. None means scale of 1.0.
             axes_length: Length of each axis.
             axes_radius: Radius of each axis.
             wxyz: Quaternion rotation to parent frame from local frame (R_pl).
@@ -966,9 +979,15 @@ class SceneApi:
         num_axes = batched_wxyzs.shape[0]
         assert batched_wxyzs.shape == (num_axes, 4)
         assert batched_positions.shape == (num_axes, 3)
+
+        if batched_scales is not None:
+            batched_scales = np.asarray(batched_scales).astype(np.float32)
+            assert batched_scales.shape in ((num_axes,), (num_axes, 3))
+
         props = _messages.BatchedAxesProps(
             batched_wxyzs=batched_wxyzs.astype(np.float32),
             batched_positions=batched_positions.astype(np.float32),
+            batched_scales=batched_scales,
             axes_length=axes_length,
             axes_radius=axes_radius,
         )
@@ -1350,6 +1369,7 @@ class SceneApi:
         faces: np.ndarray,
         batched_wxyzs: tuple[tuple[float, float, float, float], ...] | np.ndarray,
         batched_positions: tuple[tuple[float, float, float], ...] | np.ndarray,
+        batched_scales: tuple[float, ...] | np.ndarray | None = None,
         lod: Literal["auto", "off"] | tuple[tuple[float, float], ...] = "auto",
         color: RgbTupleOrArray = (90, 200, 255),
         wireframe: bool = False,
@@ -1377,6 +1397,7 @@ class SceneApi:
                 vertices. Should have shape (F, 3).
             batched_wxyzs: Float array of shape (N, 4) for orientations.
             batched_positions: Float array of shape (N, 3) for positions.
+            batched_scales: Float array of shape (N,) for uniform scales or (N,3) for per-axis (XYZ) scales. None means scale of 1.0.
             lod: LOD settings, either "off", "auto", or a tuple of (distance, ratio) pairs.
             color: Color of the meshes as an RGB tuple.
             wireframe: Boolean indicating if the meshes should be rendered as wireframes.
@@ -1413,6 +1434,10 @@ class SceneApi:
         assert batched_wxyzs.shape == (num_instances, 4)
         assert batched_positions.shape == (num_instances, 3)
 
+        if batched_scales is not None:
+            batched_scales = np.asarray(batched_scales).astype(np.float32)
+            assert batched_scales.shape in ((num_instances,), (num_instances, 3))
+
         message = _messages.BatchedMeshesMessage(
             name=name,
             props=_messages.BatchedMeshesProps(
@@ -1420,6 +1445,7 @@ class SceneApi:
                 faces=faces.astype(np.uint32),
                 batched_wxyzs=batched_wxyzs.astype(np.float32),
                 batched_positions=batched_positions.astype(np.float32),
+                batched_scales=batched_scales,
                 color=_encode_rgb(color),
                 wireframe=wireframe,
                 opacity=opacity,
@@ -1439,6 +1465,7 @@ class SceneApi:
         mesh: trimesh.Trimesh,
         batched_wxyzs: tuple[tuple[float, float, float, float], ...] | np.ndarray,
         batched_positions: tuple[tuple[float, float, float], ...] | np.ndarray,
+        batched_scales: tuple[float, ...] | np.ndarray | None = None,
         lod: Literal["auto", "off"] | tuple[tuple[float, float], ...] = "auto",
         scale: float = 1.0,
         wxyz: tuple[float, float, float, float] | np.ndarray = (1.0, 0.0, 0.0, 0.0),
@@ -1462,6 +1489,7 @@ class SceneApi:
             mesh: A trimesh mesh object.
             batched_wxyzs: Float array of shape (N, 4) for orientations.
             batched_positions: Float array of shape (N, 3) for positions.
+            batched_scales: Float array of shape (N,) for uniform scales or (N,3) for per-axis (XYZ) scales. None means scale of 1.0.
             lod: LOD settings, either "off", "auto", or a tuple of (distance, ratio) pairs.
             scale: A scale for resizing the mesh.
             wxyz: Quaternion rotation to parent frame from local frame (R_pl).
@@ -1480,6 +1508,10 @@ class SceneApi:
         assert batched_wxyzs.shape == (num_instances, 4)
         assert batched_positions.shape == (num_instances, 3)
 
+        if batched_scales is not None:
+            batched_scales = np.asarray(batched_scales).astype(np.float32)
+            assert batched_scales.shape in ((num_instances,), (num_instances, 3))
+
         with io.BytesIO() as data_buffer:
             mesh.export(data_buffer, file_type="glb")
             glb_data = data_buffer.getvalue()
@@ -1490,6 +1522,7 @@ class SceneApi:
                     scale=scale,
                     batched_wxyzs=batched_wxyzs.astype(np.float32),
                     batched_positions=batched_positions.astype(np.float32),
+                    batched_scales=batched_scales,
                     lod=lod,
                     cast_shadow=cast_shadow,
                     receive_shadow=receive_shadow,
@@ -1575,7 +1608,14 @@ class SceneApi:
         wxyz: tuple[float, float, float, float] | np.ndarray = (1.0, 0.0, 0.0, 0.0),
         position: tuple[float, float, float] | np.ndarray = (0.0, 0.0, 0.0),
         visible: bool = True,
-    ) -> MeshHandle:
+        wireframe: bool = False,
+        opacity: float | None = None,
+        material: Literal["standard", "toon3", "toon5"] = "standard",
+        flat_shading: bool = True,
+        side: Literal["front", "back", "double"] = "front",
+        cast_shadow: bool = True,
+        receive_shadow: bool = True,
+    ) -> BoxHandle:
         """Add a box to the scene.
 
         Args:
@@ -1586,24 +1626,50 @@ class SceneApi:
             wxyz: Quaternion rotation to parent frame from local frame (R_pl).
             position: Translation from parent frame to local frame (t_pl).
             visible: Whether or not this box is initially visible.
+            wireframe: Boolean indicating if the box should be rendered as a wireframe.
+            opacity: Opacity of the box. None means opaque.
+            material: Material type of the box ('standard', 'toon3', 'toon5').
+            flat_shading: Whether to do flat shading.
+            side: Side of the surface to render ('front', 'back', 'double').
+            cast_shadow: Whether this box should cast shadows.
+            receive_shadow: Whether this box should receive shadows.
 
         Returns:
             Handle for manipulating scene node.
         """
-        import trimesh.creation
+        if isinstance(dimensions, np.ndarray):
+            dimensions_list = dimensions.tolist()
+            assert len(dimensions_list) == 3, (
+                f"Expected 3 dimensions, got {len(dimensions_list)}"
+            )
+            dimensions_tuple = (
+                float(dimensions_list[0]),
+                float(dimensions_list[1]),
+                float(dimensions_list[2]),
+            )
+        else:
+            assert len(dimensions) == 3, f"Expected 3 dimensions, got {len(dimensions)}"
+            dimensions_tuple = (
+                float(dimensions[0]),
+                float(dimensions[1]),
+                float(dimensions[2]),
+            )
 
-        mesh = trimesh.creation.box(dimensions)
-
-        return self.add_mesh_simple(
+        message = _messages.BoxMessage(
             name=name,
-            vertices=mesh.vertices,
-            faces=mesh.faces,
-            color=color,
-            flat_shading=True,
-            position=position,
-            wxyz=wxyz,
-            visible=visible,
+            props=_messages.BoxProps(
+                dimensions=dimensions_tuple,
+                color=_encode_rgb(color),
+                wireframe=wireframe,
+                opacity=opacity,
+                flat_shading=flat_shading,
+                side=side,
+                material=material,
+                cast_shadow=cast_shadow,
+                receive_shadow=receive_shadow,
+            ),
         )
+        return BoxHandle._make(self, message, name, wxyz, position, visible)
 
     def add_icosphere(
         self,
@@ -1614,7 +1680,14 @@ class SceneApi:
         wxyz: tuple[float, float, float, float] | np.ndarray = (1.0, 0.0, 0.0, 0.0),
         position: tuple[float, float, float] | np.ndarray = (0.0, 0.0, 0.0),
         visible: bool = True,
-    ) -> MeshHandle:
+        wireframe: bool = False,
+        opacity: float | None = None,
+        material: Literal["standard", "toon3", "toon5"] = "standard",
+        flat_shading: bool = False,
+        side: Literal["front", "back", "double"] = "front",
+        cast_shadow: bool = True,
+        receive_shadow: bool = True,
+    ) -> IcosphereHandle:
         """Add an icosphere to the scene.
 
         Args:
@@ -1626,26 +1699,33 @@ class SceneApi:
             wxyz: Quaternion rotation to parent frame from local frame (R_pl).
             position: Translation from parent frame to local frame (t_pl).
             visible: Whether or not this icosphere is initially visible.
+            wireframe: Boolean indicating if the icosphere should be rendered as a wireframe.
+            opacity: Opacity of the icosphere. None means opaque.
+            material: Material type of the icosphere ('standard', 'toon3', 'toon5').
+            flat_shading: Whether to do flat shading.
+            side: Side of the surface to render ('front', 'back', 'double').
+            cast_shadow: Whether this icosphere should cast shadows.
+            receive_shadow: Whether this icosphere should receive shadows.
 
         Returns:
             Handle for manipulating scene node.
         """
-        import trimesh.creation
-
-        mesh = trimesh.creation.icosphere(subdivisions=subdivisions, radius=radius)
-
-        # We use add_mesh_simple() because it lets us do smooth shading;
-        # add_mesh_trimesh() currently does not.
-        return self.add_mesh_simple(
+        message = _messages.IcosphereMessage(
             name=name,
-            vertices=mesh.vertices,
-            faces=mesh.faces,
-            color=color,
-            flat_shading=False,
-            position=position,
-            wxyz=wxyz,
-            visible=visible,
+            props=_messages.IcosphereProps(
+                radius=radius,
+                subdivisions=subdivisions,
+                color=_encode_rgb(color),
+                wireframe=wireframe,
+                opacity=opacity,
+                flat_shading=flat_shading,
+                side=side,
+                material=material,
+                cast_shadow=cast_shadow,
+                receive_shadow=receive_shadow,
+            ),
         )
+        return IcosphereHandle._make(self, message, name, wxyz, position, visible)
 
     def set_background_image(
         self,
@@ -1893,15 +1973,64 @@ class SceneApi:
         handle._impl_aux.last_updated = time.time()
 
         # Trigger callbacks.
+        event = TransformControlsEvent(
+            client=self._get_client_handle(client_id),
+            client_id=client_id,
+            target=handle,
+        )
         for cb in handle._impl_aux.update_cb:
             if asyncio.iscoroutinefunction(cb):
-                await cb(handle)
+                await cb(event)
             else:
-                self._thread_executor.submit(cb, handle).add_done_callback(
+                self._thread_executor.submit(cb, event).add_done_callback(
                     print_threadpool_errors
                 )
         if handle._impl_aux.sync_cb is not None:
             handle._impl_aux.sync_cb(client_id, handle)
+
+    async def _handle_transform_controls_drag_start(
+        self, client_id: ClientId, message: _messages.TransformControlsDragStartMessage
+    ) -> None:
+        """Callback for handling transform control drag start messages."""
+        handle = self._handle_from_transform_controls_name.get(message.name, None)
+        if handle is None:
+            return
+
+        # Trigger callbacks.
+        event = TransformControlsEvent(
+            client=self._get_client_handle(client_id),
+            client_id=client_id,
+            target=handle,
+        )
+        for cb in handle._impl_aux.drag_start_cb:
+            if asyncio.iscoroutinefunction(cb):
+                await cb(event)
+            else:
+                self._thread_executor.submit(cb, event).add_done_callback(
+                    print_threadpool_errors
+                )
+
+    async def _handle_transform_controls_drag_end(
+        self, client_id: ClientId, message: _messages.TransformControlsDragEndMessage
+    ) -> None:
+        """Callback for handling transform control drag end messages."""
+        handle = self._handle_from_transform_controls_name.get(message.name, None)
+        if handle is None:
+            return
+
+        # Trigger callbacks.
+        event = TransformControlsEvent(
+            client=self._get_client_handle(client_id),
+            client_id=client_id,
+            target=handle,
+        )
+        for cb in handle._impl_aux.drag_end_cb:
+            if asyncio.iscoroutinefunction(cb):
+                await cb(event)
+            else:
+                self._thread_executor.submit(cb, event).add_done_callback(
+                    print_threadpool_errors
+                )
 
     async def _handle_node_click_updates(
         self, client_id: ClientId, message: _messages.SceneNodeClickMessage

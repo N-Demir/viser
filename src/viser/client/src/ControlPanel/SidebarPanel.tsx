@@ -3,6 +3,7 @@
 import {
   ActionIcon,
   Box,
+  Divider,
   Paper,
   ScrollArea,
   Tooltip,
@@ -134,28 +135,25 @@ SidebarPanel.Handle = function SidebarPanelHandle({
       </Tooltip>
     </ActionIcon>
   );
-
   return (
-    <Box
-      p="xs"
-      style={(theme) => ({
-        borderBottom: "1px solid",
-        borderColor:
-          useMantineColorScheme().colorScheme == "dark"
-            ? theme.colors.dark[4]
-            : theme.colors.gray[3],
-        lineHeight: "1.5em",
-        fontWeight: 400,
-        position: "relative",
-        zIndex: 20,
-        alignItems: "center",
-        display: "flex",
-        flexDirection: "row",
-      })}
-    >
-      {children}
-      {collapsible ? collapseSidebarToggleButton : null}
-    </Box>
+    <>
+      <Box
+        p="xs"
+        style={{
+          lineHeight: "1.5em",
+          fontWeight: 400,
+          position: "relative",
+          zIndex: 20,
+          alignItems: "center",
+          display: "flex",
+          flexDirection: "row",
+        }}
+      >
+        {children}
+        {collapsible ? collapseSidebarToggleButton : null}
+      </Box>
+      <Divider mx="xs" />
+    </>
   );
 };
 /** Contents of a panel. */

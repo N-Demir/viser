@@ -12,7 +12,23 @@ export type SceneNode = {
 };
 
 type SceneTreeState = {
+  // Scene graph structure: static scene node definitions from server.
   nodeFromName: { [name: string]: SceneNode | undefined };
+
+  // Dynamic runtime attributes: poses, visibility state, local overrides.
+  // Separate from nodeFromName because they have different lifecycles and access patterns.
+  nodeAttributesFromName: {
+    [name: string]:
+      | undefined
+      | {
+          poseUpdateState?: "updated" | "needsUpdate" | "waitForMakeObject";
+          wxyz?: [number, number, number, number];
+          position?: [number, number, number];
+          visibility?: boolean; // Visibility state from the server.
+          overrideVisibility?: boolean; // Override from the GUI.
+        };
+  };
+
   labelVisibleFromName: { [name: string]: boolean };
   enableDefaultLights: boolean;
   enableDefaultLightsShadows: boolean;
@@ -26,6 +42,14 @@ type SceneTreeActions = {
   updateSceneNode(name: string, updates: { [key: string]: any }): void;
   resetScene(): void;
   setLabelVisibility(name: string, labelVisibility: boolean): void;
+
+  // Node attributes management.
+  updateNodeAttributes(
+    name: string,
+    attributes:
+      | Partial<NonNullable<SceneTreeState["nodeAttributesFromName"][string]>>
+      | undefined,
+  ): void;
 };
 
 // Pre-defined scene nodes.
@@ -62,17 +86,32 @@ const worldAxesNodeTemplate: SceneNode = {
 
 /** Declare a scene state, and return a hook for accessing it. Note that we put
 effort into avoiding a global state! */
-export function useSceneTreeState(
-  nodeRefFromName: React.MutableRefObject<{
-    [name: string]: undefined | THREE.Object3D;
-  }>,
-) {
+export function useSceneTreeState(nodeRefFromName: {
+  [name: string]: undefined | THREE.Object3D;
+}) {
   return React.useState(() =>
     create(
       immer<SceneTreeState & SceneTreeActions>((set) => ({
         nodeFromName: {
           "": rootNodeTemplate,
           "/WorldAxes": worldAxesNodeTemplate,
+        },
+        nodeAttributesFromName: {
+          "": {
+            // Default quaternion: 90° around X, 180° around Y, -90° around Z.
+            // This matches the coordinate system transformation.
+            wxyz: (() => {
+              const quat = new THREE.Quaternion().setFromEuler(
+                new THREE.Euler(Math.PI / 2, Math.PI, -Math.PI / 2),
+              );
+              return [quat.w, quat.x, quat.y, quat.z] as [
+                number,
+                number,
+                number,
+                number,
+              ];
+            })(),
+          },
         },
         labelVisibleFromName: {},
         enableDefaultLights: true,
@@ -97,7 +136,7 @@ export function useSceneTreeState(
             const existingNode = state.nodeFromName[message.name];
             if (existingNode !== undefined) {
               // Node already exists.
-              delete nodeRefFromName.current[message.name];
+              delete nodeRefFromName[message.name];
               state.nodeFromName[message.name] = {
                 ...existingNode,
                 message: message,
@@ -128,7 +167,7 @@ export function useSceneTreeState(
 
             removeNames.forEach((removeName) => {
               delete state.nodeFromName[removeName];
-              delete nodeRefFromName.current[removeName];
+              delete nodeRefFromName[removeName];
             });
 
             // Remove node from parent's children list.
@@ -160,10 +199,31 @@ export function useSceneTreeState(
             }
             state.nodeFromName[""] = rootNodeTemplate;
             state.nodeFromName["/WorldAxes"] = worldAxesNodeTemplate;
+
+            // Also reset node attributes (keep root attributes).
+            const rootAttrs = state.nodeAttributesFromName[""];
+            state.nodeAttributesFromName = rootAttrs ? { "": rootAttrs } : {};
           }),
         setLabelVisibility: (name, labelVisibility) =>
           set((state) => {
             state.labelVisibleFromName[name] = labelVisibility;
+          }),
+
+        // Node attributes management actions.
+        updateNodeAttributes: (name, attributes) =>
+          set((state) => {
+            if (attributes === undefined) {
+              // Remove the node attributes entirely.
+              delete state.nodeAttributesFromName[name];
+            } else {
+              if (!state.nodeAttributesFromName[name]) {
+                state.nodeAttributesFromName[name] = {};
+              }
+              state.nodeAttributesFromName[name] = {
+                ...state.nodeAttributesFromName[name],
+                ...attributes,
+              };
+            }
           }),
       })),
     ),
