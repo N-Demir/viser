@@ -57,7 +57,7 @@ const cleanGuiState: GuiState = {
     control_layout: "floating",
     control_width: "medium",
     dark_mode: false,
-    show_logo: true,
+    show_logo: false,
     show_share_button: true,
     colors: null,
   },
