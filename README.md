@@ -1,3 +1,12 @@
+Changes:
+gsplat_viewer/viewer.py -- not so sure what this is
+
+added camera speed for movement as something settable by the url params
+location and look at are also settable, so is some intrinsics I think.
+
+We "mimic" a fps mode by having the orbit control commands zoomed in a lot
+
+----
 <h1 align="left">
     <img alt="viser logo" src="https://viser.studio/main/_static/logo.svg" width="auto" height="30" />
     viser
