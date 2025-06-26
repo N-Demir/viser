@@ -301,9 +301,10 @@ function ViewerContents({ children }: { children: React.ReactNode }) {
               </ViewerCanvas>
               {showLogo && messageSource === "websocket" && <ViserLogo />}
             </Box>
-            {messageSource === "websocket" && (
+            {/* This is the control panel that is used to show viser gui related things and specify the server url (which could be hardcoded instead or something) */}
+            {/* {messageSource === "websocket" && (
               <ControlPanel control_layout={controlLayout} />
-            )}
+            )} */}
           </Box>
         </Box>
       </MantineProvider>
