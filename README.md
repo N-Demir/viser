@@ -29,6 +29,7 @@ cd ~/viser/src/viser/client
 yarn start
 ```
 
+this will launch the editable frontend. And you can open it in the browser. Then you need to launch the server with a python command. And then in the browser specify what the url is for the server to connect to
 
 
 ----
