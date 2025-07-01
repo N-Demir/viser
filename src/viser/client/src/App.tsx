@@ -28,7 +28,6 @@ import { useDisclosure } from "@mantine/hooks";
 import { SynchronizedCameraControls } from "./CameraControls";
 import { SceneNodeThreeObject } from "./SceneTree";
 import { ViewerContext, ViewerContextContents } from "./ViewerContext";
-import ControlPanel from "./ControlPanel/ControlPanel";
 import { useGuiState } from "./ControlPanel/GuiState";
 import { searchParamKey } from "./SearchParamsUtils";
 import { WebsocketMessageProducer } from "./WebsocketInterface";
@@ -231,7 +230,6 @@ function ViewerContents({ children }: { children: React.ReactNode }) {
   const viewer = React.useContext(ViewerContext)!;
   const darkMode = viewer.useGui((state) => state.theme.dark_mode);
   const colors = viewer.useGui((state) => state.theme.colors);
-  const controlLayout = viewer.useGui((state) => state.theme.control_layout);
   const showLogo = viewer.useGui((state) => state.theme.show_logo);
   const { messageSource } = viewer;
 
@@ -301,10 +299,6 @@ function ViewerContents({ children }: { children: React.ReactNode }) {
               </ViewerCanvas>
               {showLogo && messageSource === "websocket" && <ViserLogo />}
             </Box>
-            {/* This is the control panel that is used to show viser gui related things and specify the server url (which could be hardcoded instead or something) */}
-            {/* {messageSource === "websocket" && (
-              <ControlPanel control_layout={controlLayout} />
-            )} */}
           </Box>
         </Box>
       </MantineProvider>
