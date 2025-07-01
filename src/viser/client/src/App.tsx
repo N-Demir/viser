@@ -361,6 +361,10 @@ function ViewerCanvas({ children }: { children: React.ReactNode }) {
   const handlePointerDown = (e: React.PointerEvent) => {
     const { mutable } = viewer;
     const pointerInfo = mutable.current.scenePointerInfo;
+
+    // Maybe bad style according to chatgpt... but it works?
+    mutable.current.cameraControl?.lockPointer();
+
     if (pointerInfo.enabled === false) return;
 
     const canvasBbox = mutable.current.canvas!.getBoundingClientRect();
