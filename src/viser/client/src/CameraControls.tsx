@@ -2,83 +2,11 @@ import { ViewerContext } from "./ViewerContext";
 import { CameraControls } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
 import * as holdEvent from "hold-event";
-import React, { useContext, useRef, useState } from "react";
-import { useFrame } from "@react-three/fiber";
+import React, { useContext, useRef } from "react";
 import { PerspectiveCamera } from "three";
 import * as THREE from "three";
 import { computeT_threeworld_world } from "./WorldTransformUtils";
 import { useThrottledMessageSender } from "./WebsocketUtils";
-import { Grid, PivotControls } from "@react-three/drei";
-
-function OrbitOriginTool({
-  forceShow,
-  pivotRef,
-  onPivotChange,
-  update,
-}: {
-  forceShow: boolean;
-  pivotRef: React.RefObject<THREE.Group>;
-  onPivotChange: (matrix: THREE.Matrix4) => void;
-  update: () => void;
-}) {
-  const viewer = useContext(ViewerContext)!;
-  const showCameraControls = viewer.useGui(
-    (state) => state.showOrbitOriginTool,
-  );
-  React.useEffect(update, [showCameraControls]);
-
-  if (!showCameraControls && !forceShow) return null;
-
-  return (
-    <PivotControls
-      ref={pivotRef}
-      scale={200}
-      lineWidth={4}
-      fixed={true}
-      axisColors={["#ffaaff", "#ff33ff", "#ffaaff"]}
-      disableScaling={true}
-      onDragEnd={() => {
-        onPivotChange(pivotRef.current!.matrix);
-      }}
-    >
-      <mesh>
-        <sphereGeometry args={[0.1, 32, 32]} />
-        <shaderMaterial
-          transparent
-          uniforms={{
-            color: { value: new THREE.Color("#ff33ff") },
-            size: { value: 200.0 },
-          }}
-          vertexShader={`
-            // Custom shader for defining sphere size in screen space.
-            uniform float size;
-            void main() {
-              vec4 clipPos = projectionMatrix * modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-              vec4 clipPosOffset = projectionMatrix * modelViewMatrix * vec4(position * size / 1000.0, 1.0);
-              gl_Position = clipPos + (clipPosOffset - clipPos) * clipPos.w;
-            }
-          `}
-          fragmentShader={`
-            uniform vec3 color;
-            void main() {
-              gl_FragColor = vec4(color, 0.8);
-            }
-          `}
-        />
-      </mesh>
-      <Grid
-        args={[10, 10, 10, 10]}
-        infiniteGrid
-        fadeStrength={0}
-        fadeFrom={0}
-        fadeDistance={1000}
-        sectionColor={"#ffaaff"}
-        cellColor={"#ffccff"}
-        side={THREE.DoubleSide}
-      />
-    </PivotControls>
-  );
-}
 
 export function SynchronizedCameraControls() {
   const viewer = useContext(ViewerContext)!;
@@ -111,107 +39,7 @@ export function SynchronizedCameraControls() {
     }
   }
 
-  // Animation state interface.
-  interface CameraAnimation {
-    startUp: THREE.Vector3;
-    targetUp: THREE.Vector3;
-    startLookAt: THREE.Vector3;
-    targetLookAt: THREE.Vector3;
-    startTime: number;
-    duration: number;
-  }
-
-  const [cameraAnimation, setCameraAnimation] =
-    useState<CameraAnimation | null>(null);
-
-  // Animation parameters.
-  const ANIMATION_DURATION = 0.5; // seconds
-
-  useFrame((state) => {
-    if (cameraAnimation && viewerMutable.cameraControl) {
-      const cameraControls = viewerMutable.cameraControl;
-      const camera = cameraControls.camera;
-
-      const elapsed = state.clock.getElapsedTime() - cameraAnimation.startTime;
-      const progress = Math.min(elapsed / cameraAnimation.duration, 1);
-
-      // Smooth step easing.
-      const t = progress * progress * (3 - 2 * progress);
-
-      // Interpolate up vector.
-      const newUp = new THREE.Vector3()
-        .copy(cameraAnimation.startUp)
-        .lerp(cameraAnimation.targetUp, t)
-        .normalize();
-
-      // Interpolate look-at position.
-      const newLookAt = new THREE.Vector3()
-        .copy(cameraAnimation.startLookAt)
-        .lerp(cameraAnimation.targetLookAt, t);
-
-      camera.up.copy(newUp);
-
-      // Back up position.
-      const prevPosition = new THREE.Vector3();
-      cameraControls.getPosition(prevPosition);
-
-      cameraControls.updateCameraUp();
-
-      // Restore position and set new look-at.
-      cameraControls.setPosition(
-        prevPosition.x,
-        prevPosition.y,
-        prevPosition.z,
-        false,
-      );
-
-      cameraControls.setLookAt(
-        prevPosition.x,
-        prevPosition.y,
-        prevPosition.z,
-        newLookAt.x,
-        newLookAt.y,
-        newLookAt.z,
-        false,
-      );
-
-      // Clear animation when complete.
-      if (progress >= 1) {
-        setCameraAnimation(null);
-      }
-    }
-  });
-
-  const { clock } = useThree();
-
-  const updateCameraLookAtAndUpFromPivotControl = (matrix: THREE.Matrix4) => {
-    if (!viewerMutable.cameraControl) return;
-
-    const targetPosition = new THREE.Vector3();
-    targetPosition.setFromMatrixPosition(matrix);
-
-    const cameraControls = viewerMutable.cameraControl;
-    const camera = viewerMutable.cameraControl.camera;
-
-    // Get target up vector from matrix.
-    const targetUp = new THREE.Vector3().setFromMatrixColumn(matrix, 1);
-
-    // Get current look-at position.
-    const currentLookAt = cameraControls.getTarget(new THREE.Vector3());
-
-    // Start new animation.
-    setCameraAnimation({
-      startUp: camera.up.clone(),
-      targetUp: targetUp,
-      startLookAt: currentLookAt,
-      targetLookAt: targetPosition,
-      startTime: clock.getElapsedTime(),
-      duration: ANIMATION_DURATION,
-    });
-  };
-
   const updatePivotControlFromCameraLookAtAndup = () => {
-    if (cameraAnimation !== null) return;
     if (!viewerMutable.cameraControl) return;
     if (!pivotRef.current) return;
 
@@ -519,14 +347,6 @@ export function SynchronizedCameraControls() {
         draggingSmoothTime={0.0}
         onChange={sendCamera}
         makeDefault
-      />
-      <OrbitOriginTool
-        forceShow={false} //{logCamera !== null /* Always show if logging camera */}
-        pivotRef={pivotRef}
-        onPivotChange={(matrix) => {
-          updateCameraLookAtAndUpFromPivotControl(matrix);
-        }}
-        update={updatePivotControlFromCameraLookAtAndup}
       />
     </>
   );
