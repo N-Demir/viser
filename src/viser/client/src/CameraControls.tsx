@@ -261,6 +261,7 @@ export function SynchronizedCameraControls() {
     return () => resizeObserver.disconnect();
   }, [canvas]);
 
+
   // Keyboard controls.
   React.useEffect(() => {
     const cameraControls = viewerMutable.cameraControl!;

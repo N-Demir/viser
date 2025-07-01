@@ -3,7 +3,7 @@ import "@mantine/notifications/styles.css";
 import "./App.css";
 import "./index.css";
 
-import { CameraControls, FirstPersonControls } from "@react-three/drei";
+import { CameraControls } from "@react-three/drei";
 import * as THREE from "three";
 import React from "react";
 import { UseSceneTree } from "./SceneTree";
@@ -24,7 +24,7 @@ export type ViewerMutable = {
   scene: THREE.Scene | null;
   camera: THREE.PerspectiveCamera | null;
   backgroundMaterial: THREE.ShaderMaterial | null;
-  cameraControl: CameraControls | FirstPersonControls | null;
+  cameraControl: CameraControls | null;
 
   // Scene management.
   nodeRefFromName: {
