@@ -203,7 +203,7 @@ export function SynchronizedCameraControls() {
               number,
               number,
             ])
-          : [3.0, 3.0, 3.0]) as [number, number, number]),
+          : [0.0, 0.0, 0.0]) as [number, number, number]),
       );
       initialCameraPos.applyMatrix4(computeT_threeworld_world(viewer));
       const initialCameraLookAt = new THREE.Vector3(
@@ -213,7 +213,7 @@ export function SynchronizedCameraControls() {
               number,
               number,
             ])
-          : [0, 0, 0]) as [number, number, number]),
+          : [0, 0, -1e-6]) as [number, number, number]),
       );
       initialCameraLookAt.applyMatrix4(computeT_threeworld_world(viewer));
       const initialCameraUp = new THREE.Vector3(

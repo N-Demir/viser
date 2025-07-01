@@ -1,10 +1,9 @@
-Changes:
-gsplat_viewer/viewer.py -- not so sure what this is
+added
+- pointer lock
+- camera speed for movement as something settable by the url params
+- a default fps mode (though how it interacts with the url params is still unclear to me)
 
-added camera speed for movement as something settable by the url params
-location and look at are also settable, so is some intrinsics I think.
-
-We "mimic" a fps mode by having the orbit control commands zoomed in a lot
+Note: We "mimic" a fps mode by having the orbit control commands zoomed in a lot -- this is the recommended approach in the `camera-controls` library (which does this as a hack to support the fps mode)
 
 How to run:
 ```
